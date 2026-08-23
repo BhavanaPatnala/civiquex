@@ -54,6 +54,13 @@ export async function saveBase64Media(base64: string, mimeType: string, maxBytes
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     const blob = await put(`uploads/${filename}`, bytes, { access: "public", contentType: mimeType, addRandomSuffix: false });
     blobUrl = blob.url;
+  } else if (process.env.VERCEL) {
+    // Running on Vercel with no Blob token configured: local disk would fail
+    // with a confusing EROFS error deep in fs.writeFile. Fail loudly here
+    // instead, with a message that says exactly what's missing.
+    throw new Error(
+      "Media storage isn't configured for this deployment: BLOB_READ_WRITE_TOKEN is missing. Connect a Blob store to this Vercel project (Storage tab) and redeploy."
+    );
   } else {
     await fs.mkdir(UPLOAD_DIR, { recursive: true });
     await fs.writeFile(path.join(UPLOAD_DIR, filename), bytes);

@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { Map as MLMap, GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Loader2 } from "lucide-react";
+import { Loader2, MapPinOff, RotateCcw } from "lucide-react";
+
+const LOAD_TIMEOUT_MS = 10_000;
 
 export interface MapIncidentPoint {
   id: string;
@@ -72,9 +74,13 @@ export function CityMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
   const [ready, setReady] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current) return;
+    setReady(false);
+    setTimedOut(false);
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -86,7 +92,13 @@ export function CityMap({
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }));
 
+    // A map that never fires "load" (a blocked tile host, a dead network,
+    // a WebGL context that failed to init) must never leave the user
+    // staring at a spinner forever with no way out.
+    const timeoutId = setTimeout(() => setTimedOut(true), LOAD_TIMEOUT_MS);
+
     map.on("load", () => {
+      clearTimeout(timeoutId);
       map.addSource("incidents", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -172,11 +184,12 @@ export function CityMap({
 
     mapRef.current = map;
     return () => {
+      clearTimeout(timeoutId);
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [retryKey]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -212,9 +225,23 @@ export function CityMap({
   return (
     <div className={className} style={{ position: "relative" }}>
       <div ref={containerRef} className="h-full w-full rounded-lg" />
-      {!ready && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-muted/60">
+      {!ready && !timedOut && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-muted/60">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Loading map…</span>
+        </div>
+      )}
+      {!ready && timedOut && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/60 px-4 text-center">
+          <MapPinOff className="h-5 w-5 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">The map couldn&apos;t load — this is usually a slow or blocked connection to the map tile server.</p>
+          <button
+            type="button"
+            onClick={() => setRetryKey((k) => k + 1)}
+            className="mt-1 flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium transition-colors hover:bg-accent"
+          >
+            <RotateCcw className="h-3 w-3" /> Retry
+          </button>
         </div>
       )}
     </div>

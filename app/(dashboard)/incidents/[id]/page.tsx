@@ -136,7 +136,7 @@ export default function IncidentDetailPage() {
   const unresolved = unresolvedCount(checks);
 
   return (
-    <PageContainer className="mx-auto flex max-w-3xl flex-col gap-5">
+    <PageContainer className="mx-auto flex max-w-3xl animate-in flex-col gap-5 fade-in slide-in-from-bottom-2 duration-500">
       <div>
         <Link href="/incidents" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> Back
@@ -165,11 +165,24 @@ export default function IncidentDetailPage() {
             <div>
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Evidence</p>
               <div className="mt-1 flex items-baseline gap-2">
-                <span className={cn("h-2 w-2 shrink-0 rounded-full", triage === "action_ready" ? "bg-success" : triage === "review_required" ? "bg-warning" : "bg-muted-foreground")} aria-hidden />
+                <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+                  {triage !== "insufficient" && (
+                    <span
+                      className={cn(
+                        "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
+                        triage === "action_ready" ? "bg-success" : "bg-warning"
+                      )}
+                    />
+                  )}
+                  <span
+                    className={cn(
+                      "relative inline-flex h-2 w-2 rounded-full",
+                      triage === "action_ready" ? "bg-success" : triage === "review_required" ? "bg-warning" : "bg-muted-foreground"
+                    )}
+                  />
+                </span>
                 <span className="text-lg font-semibold text-foreground">{TRIAGE_LABEL[triage]}</span>
-                {(user?.role === "AUTHORITY" || user?.role === "ADMIN") && (
-                  <span className="text-xs tabular-nums text-muted-foreground">{evidenceScoreOf(incident.evidenceConfidenceOverall)}/100</span>
-                )}
+                <span className="text-xs tabular-nums text-muted-foreground">{evidenceScoreOf(incident.evidenceConfidenceOverall)}/100</span>
               </div>
             </div>
             {incident.status === "RESOLVED" && (
@@ -263,11 +276,11 @@ export default function IncidentDetailPage() {
       {/* CHECKS COMPLETED */}
       <Card className="overflow-hidden">
         <details className="group" open>
-          <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5 transition-colors hover:bg-accent/50">
             <p className="text-sm font-semibold tracking-tight text-foreground">Checks completed</p>
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
           </summary>
-          <div className="flex flex-col gap-2 border-t border-border px-6 py-4">
+          <div className="flex animate-in flex-col gap-2 border-t border-border px-6 py-4 fade-in slide-in-from-top-1 duration-200">
             {verificationChecklist(incident.evidenceConfidenceBreakdown).map((item) => (
               <div key={item.label} className={cn("flex items-center gap-2 text-sm", item.passed ? "text-foreground" : "text-muted-foreground")}>
                 {item.passed ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" /> : <Circle className="h-4 w-4 shrink-0" />}
@@ -281,7 +294,7 @@ export default function IncidentDetailPage() {
       {/* POSSIBLE OTHER EXPLANATIONS */}
       <Card className="overflow-hidden">
         <details className="group">
-          <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5 transition-colors hover:bg-accent/50">
             <div>
               <p className="text-sm font-semibold tracking-tight text-foreground">Other explanations considered</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -290,7 +303,7 @@ export default function IncidentDetailPage() {
             </div>
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
           </summary>
-          <div className="flex flex-col gap-3 border-t border-border px-6 py-4">
+          <div className="flex animate-in flex-col gap-3 border-t border-border px-6 py-4 fade-in slide-in-from-top-1 duration-200">
             {checks.map((c, i) => (
               <div key={i} className="flex items-start gap-2">
                 {c.ruledOut ? (

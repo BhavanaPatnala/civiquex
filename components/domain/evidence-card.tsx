@@ -27,12 +27,11 @@ export function EvidenceCard({
   incident,
   href,
   dense = false,
-  showScore = false,
+  showScore = true,
 }: {
   incident: EvidenceCardIncident;
   href: string;
   dense?: boolean;
-  /** Officers/admins adjudicate evidence and may want the underlying number; citizens only ever see the plain word. */
   showScore?: boolean;
 }) {
   const triage = deriveTriage(incident.ruleVerdict, incident.evidenceConfidenceOverall);

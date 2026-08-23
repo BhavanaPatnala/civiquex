@@ -39,8 +39,15 @@ test.describe("Critical flows", () => {
     ).toBeVisible();
     await expect(page.getByText("Checks completed")).toBeVisible();
     // the rule engine's own wording — a violation is always flagged as
-    // "potential", never presented as an established fact
-    await expect(page.getByText(/potential violation, not a confirmed one|does not support .* at this time|No matching regulation/)).toBeVisible();
+    // "potential", never presented as an established fact. All four of its
+    // possible verdict reasoning templates (see lib/engines/rules.ts) are
+    // covered here since which one appears depends on this incident's real
+    // evidence, not something the test controls.
+    await expect(
+      page.getByText(
+        /potential violation, not a confirmed one|does not support .* at this time|No matching regulation|Visual evidence quality is too low/
+      )
+    ).toBeVisible();
   });
 
   test("hotspots page treats a recurring location as one hotspot, not independent complaints", async ({ page }) => {

@@ -24,7 +24,7 @@ import { apiGet, apiPost, blobToBase64, ApiError } from "@/lib/client/api";
 import { useToast } from "@/components/ui/toast-provider";
 import { INCIDENT_TYPES } from "@/lib/types";
 import { cn, titleCase, formatDateTime } from "@/lib/utils";
-import { deriveTriage, TRIAGE_LABEL, type Triage } from "@/lib/presentation/triage";
+import { deriveTriage, evidenceScoreOf, TRIAGE_LABEL, type Triage } from "@/lib/presentation/triage";
 import { describeCaptured, vehicleLine } from "@/lib/presentation/plainLanguage";
 
 /** Grabs a single decoded frame from a recorded video blob, for running real object detection on a captured clip the same way we do for a photo. */
@@ -560,6 +560,7 @@ function ReportPageInner() {
                     <div className="flex items-center gap-2 rounded-lg border border-border p-3">
                       <span className={cn("h-2 w-2 rounded-full", dot)} aria-hidden />
                       <span className="text-sm font-medium text-foreground">Evidence: {TRIAGE_LABEL[triage]}</span>
+                      <span className="text-xs tabular-nums text-muted-foreground">{evidenceScoreOf(incident.evidenceConfidenceOverall)}/100</span>
                     </div>
 
                     <p className={cn("text-xs", captured.nothingRelevant ? "font-medium text-warning" : "text-muted-foreground")}>{captured.text}</p>

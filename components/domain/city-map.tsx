@@ -40,9 +40,12 @@ const RISK_COLOR: Record<string, string> = {
 // so tiles fetch but silently fail to decode. CARTO's free basemaps are
 // built for exactly this kind of embedding and send proper CORS headers;
 // "dark_all" also matches this app's actual theme instead of a plain light
-// raster on a dark page.
-const TILE_URL = process.env.NEXT_PUBLIC_MAP_TILE_URL ?? "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png";
-const ATTRIBUTION = process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ?? "© OpenStreetMap contributors © CARTO";
+// raster on a dark page. Hardcoded, not env-configurable: a stale
+// NEXT_PUBLIC_MAP_TILE_URL left over from before this fix (baked into a
+// prior Vercel build) would otherwise silently keep overriding this and
+// resurrecting the exact bug this fixes.
+const TILE_URL = "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png";
+const ATTRIBUTION = "© OpenStreetMap contributors © CARTO";
 
 const STYLE: maplibregl.StyleSpecification = {
   version: 8,

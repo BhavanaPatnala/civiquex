@@ -52,7 +52,11 @@ export async function saveBase64Media(base64: string, mimeType: string, maxBytes
 
   let blobUrl: string | null = null;
   if (process.env.BLOB_READ_WRITE_TOKEN) {
-    const blob = await put(`uploads/${filename}`, bytes, { access: "public", contentType: mimeType, addRandomSuffix: false });
+    // Private access: the blob's own URL is not fetchable by anyone who has
+    // it, only via an authenticated read (see the "private" branch in
+    // app/api/media/[filename]/route.ts) — matching this app's actual
+    // access model (evidence is session-gated, never a bare public link).
+    const blob = await put(`uploads/${filename}`, bytes, { access: "private", contentType: mimeType, addRandomSuffix: false });
     blobUrl = blob.url;
   } else if (process.env.VERCEL) {
     // Running on Vercel with no Blob token configured: local disk would fail

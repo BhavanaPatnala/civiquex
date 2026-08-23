@@ -56,7 +56,16 @@ export async function saveBase64Media(base64: string, mimeType: string, maxBytes
     // it, only via an authenticated read (see the "private" branch in
     // app/api/media/[filename]/route.ts) — matching this app's actual
     // access model (evidence is session-gated, never a bare public link).
-    const blob = await put(`uploads/${filename}`, bytes, { access: "private", contentType: mimeType, addRandomSuffix: false });
+    // Filenames are content hashes: identical bytes always produce the same
+    // path, so a second upload of the same content is a legitimate no-op,
+    // not an error — allowOverwrite makes that behave the same way the
+    // local-disk branch already does (fs.writeFile silently replaces).
+    const blob = await put(`uploads/${filename}`, bytes, {
+      access: "private",
+      contentType: mimeType,
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
     blobUrl = blob.url;
   } else if (process.env.VERCEL) {
     // Running on Vercel with no Blob token configured: local disk would fail

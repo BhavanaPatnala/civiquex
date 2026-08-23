@@ -185,7 +185,11 @@ export default function IncidentDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {!alreadySubmitted && (
-              <Button onClick={handleSubmit} disabled={busy !== null || !incident.authority}>
+              <Button
+                onClick={handleSubmit}
+                disabled={busy !== null || !incident.authority || triage === "insufficient"}
+                title={triage === "insufficient" ? "Evidence is insufficient — this can't be submitted to an authority" : undefined}
+              >
                 {busy === "submit" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 Submit to authority
               </Button>
@@ -196,7 +200,13 @@ export default function IncidentDetailPage() {
             </Button>
             {isAuthorityForIncident && alreadySubmitted && <AuthorityResponseDialog incidentId={incident.id} onDone={load} />}
           </div>
-          {!incident.authority && (
+          {!alreadySubmitted && triage === "insufficient" && (
+            <p className="text-xs text-muted-foreground">
+              There isn&apos;t enough real evidence to act on — see &quot;What happened&quot; below. This stays on record, but can&apos;t be forwarded
+              to an authority as-is.
+            </p>
+          )}
+          {!alreadySubmitted && triage !== "insufficient" && !incident.authority && (
             <p className="text-xs text-muted-foreground">No authority is registered for this location and incident type yet.</p>
           )}
         </CardContent>

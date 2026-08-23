@@ -125,7 +125,16 @@ function ReportPageInner() {
   const [processingLabel, setProcessingLabel] = useState("Running AI detection on your evidence…");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const detector = useRoadPatrolDetector(videoRef);
+  // Deferred: loading TensorFlow.js is heavy enough to visibly compete with
+  // the UI thread, and this page's very first screen is just picking a
+  // category — nothing here needs the model yet. It starts loading once the
+  // reporter moves on to the capture step, so it's warmed up by the time
+  // they actually take a photo, without janking the type-selection tap.
+  const detector = useRoadPatrolDetector(videoRef, { autoLoad: false });
+  useEffect(() => {
+    if (step !== "type") detector.loadModel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -543,33 +552,44 @@ function ReportPageInner() {
               {(() => {
                 const triage: Triage = deriveTriage(incident.ruleVerdict, incident.evidenceConfidenceOverall);
                 const dot = triage === "action_ready" ? "bg-success" : triage === "review_required" ? "bg-warning" : "bg-muted-foreground";
-                return (
-                  <div className="flex items-center gap-2 rounded-lg border border-border p-3">
-                    <span className={cn("h-2 w-2 rounded-full", dot)} aria-hidden />
-                    <span className="text-sm font-medium text-foreground">Evidence: {TRIAGE_LABEL[triage]}</span>
-                  </div>
-                );
-              })()}
-
-              {(() => {
                 const captured = describeCaptured(incident.incidentType, incident.observations[0]?.observation ?? null);
+                const blocked = triage === "insufficient";
+
                 return (
-                  <p className={cn("text-xs", captured.nothingRelevant ? "font-medium text-warning" : "text-muted-foreground")}>{captured.text}</p>
+                  <>
+                    <div className="flex items-center gap-2 rounded-lg border border-border p-3">
+                      <span className={cn("h-2 w-2 rounded-full", dot)} aria-hidden />
+                      <span className="text-sm font-medium text-foreground">Evidence: {TRIAGE_LABEL[triage]}</span>
+                    </div>
+
+                    <p className={cn("text-xs", captured.nothingRelevant ? "font-medium text-warning" : "text-muted-foreground")}>{captured.text}</p>
+
+                    <div className="flex flex-col gap-2 pt-2 sm:flex-row">
+                      <Button
+                        onClick={handleSubmitToAuthority}
+                        disabled={submitBusy || blocked}
+                        title={blocked ? "Evidence is insufficient — this can't be submitted to an authority" : undefined}
+                        className="flex-1"
+                      >
+                        {submitBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {blocked ? "Cannot submit — insufficient evidence" : "Submit report"}
+                      </Button>
+                      <Button variant="outline" onClick={() => router.push(`/incidents/${result.incidentId}`)} className="flex-1">
+                        View evidence
+                      </Button>
+                      <Button variant="ghost" onClick={() => router.push("/")}>
+                        Done
+                      </Button>
+                    </div>
+                    {blocked && (
+                      <p className="text-xs text-muted-foreground">
+                        This report is still saved under &quot;Your submissions&quot; for your own record, but it won&apos;t be forwarded to an
+                        authority — there isn&apos;t enough real evidence to act on.
+                      </p>
+                    )}
+                  </>
                 );
               })()}
-
-              <div className="flex flex-col gap-2 pt-2 sm:flex-row">
-                <Button onClick={handleSubmitToAuthority} disabled={submitBusy} className="flex-1">
-                  {submitBusy && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Submit report
-                </Button>
-                <Button variant="outline" onClick={() => router.push(`/incidents/${result.incidentId}`)} className="flex-1">
-                  View evidence
-                </Button>
-                <Button variant="ghost" onClick={() => router.push("/")}>
-                  Done
-                </Button>
-              </div>
             </CardContent>
           </Card>
         )}

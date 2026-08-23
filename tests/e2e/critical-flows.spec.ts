@@ -28,9 +28,11 @@ test.describe("Critical flows", () => {
   test("incident detail shows supporting recordings with decomposed, plain-language evidence checks", async ({ page }) => {
     await login(page, "citizen1@demo.civiquex.app");
     await page.goto("/incidents");
-    await page.locator("a", { hasText: "View evidence" }).first().click();
-    await page.waitForURL("**/incidents/**");
-    await expect(page.getByText("Proof")).toBeVisible();
+    const evidenceLink = page.locator("a", { hasText: "View evidence" }).first();
+    await evidenceLink.waitFor({ state: "visible", timeout: 15_000 }); // real network round-trip to the DB, not instant local SQLite
+    await evidenceLink.click();
+    await page.waitForURL(/\/incidents\/[^/]+$/, { timeout: 15_000 }); // require an id segment — plain "/incidents" must not match
+    await expect(page.getByText("Proof")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/supporting recording/)).toBeVisible();
     await expect(
       page.getByText("Strong evidence").or(page.getByText("Review required")).or(page.getByText("Insufficient evidence"))
@@ -52,7 +54,7 @@ test.describe("Critical flows", () => {
   test("resolution queue independently re-verifies a still-present incident despite an authority report", async ({ page }) => {
     await login(page, "citizen1@demo.civiquex.app");
     await page.goto("/resolution");
-    await expect(page.getByText("Reopened").or(page.getByText("Still present"))).toBeVisible();
+    await expect(page.getByText("Reopened").or(page.getByText("Still present"))).toBeVisible({ timeout: 15_000 }); // real DB round-trip, not instant local SQLite
   });
 
   test("authority account sees a priority queue and can respond, feeding the routing feedback log", async ({ page }) => {

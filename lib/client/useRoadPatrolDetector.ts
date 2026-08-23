@@ -36,7 +36,8 @@ interface CocoSsdModel {
  * on the live video frame. Every number here comes from an actual model
  * inference or an actual pixel computation; nothing is simulated.
  */
-export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement>) {
+export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement>, options?: { autoLoad?: boolean }) {
+  const autoLoad = options?.autoLoad ?? true;
   const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
   const [modelError, setModelError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -49,9 +50,18 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const totalInferenceMsRef = useRef(0);
   const framesAnalyzedRef = useRef(0);
+  const loadStartedRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Loading TensorFlow.js + the COCO-SSD model is genuinely CPU-heavy (WebGL
+  // shader compilation, multi-MB download) — kicking it off the instant this
+  // hook mounts competes with the UI for the main thread right when a user
+  // is clicking through the earliest, lightest steps of a flow. loadModel()
+  // lets a caller defer that work until it's actually needed (see
+  // app/(dashboard)/report/page.tsx, which starts it once the reporter has
+  // moved past picking a category, not on page load).
+  const loadModel = useCallback(() => {
+    if (loadStartedRef.current) return;
+    loadStartedRef.current = true;
     setModelStatus("loading");
     (async () => {
       try {
@@ -59,19 +69,19 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
         await tf.ready();
         const cocoSsd = await import("@tensorflow-models/coco-ssd");
         const model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
-        if (cancelled) return;
         modelRef.current = model as unknown as CocoSsdModel;
         setModelStatus("ready");
       } catch (err) {
-        if (cancelled) return;
         setModelError(err instanceof Error ? err.message : "Failed to load the detection model");
         setModelStatus("unavailable");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    if (autoLoad) loadModel();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLoad]);
 
   const analyzeCanvas = useCallback(
     async (canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D): Promise<PatrolFrameResult | null> => {
@@ -159,6 +169,7 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
    */
   const analyzeImageBlob = useCallback(
     async (file: Blob): Promise<{ ok: true; result: PatrolFrameResult } | { ok: false; reason: "model-not-ready" | "decode-failed" | "canvas-unavailable" }> => {
+      loadModel(); // no-op if already loading/loaded — safety net for a caller that skipped the deferred-load trigger
       for (let attempt = 0; attempt < 100 && !modelRef.current; attempt++) {
         await new Promise((r) => setTimeout(r, 100));
       }
@@ -185,13 +196,14 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
       const result = await analyzeCanvas(canvas, ctx);
       return result ? { ok: true, result } : { ok: false, reason: "model-not-ready" };
     },
-    [analyzeCanvas]
+    [analyzeCanvas, loadModel]
   );
 
   return {
     modelStatus,
     modelError,
     scanning,
+    loadModel,
     start,
     stop,
     runOnce,

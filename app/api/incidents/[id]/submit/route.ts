@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth";
 import { ok, fail, withApiHandler } from "@/lib/api/respond";
 import { eventBus } from "@/lib/realtime/bus";
 import { formatSubmissionReference } from "@/lib/ids";
+import { deriveTriage } from "@/lib/presentation/triage";
 
 export const POST = withApiHandler(async (_req: Request, { params }: { params: { id: string } }) => {
   await requireSession();
@@ -12,6 +13,11 @@ export const POST = withApiHandler(async (_req: Request, { params }: { params: {
     include: { authority: true },
   });
   if (!incident) return fail("Incident not found", 404);
+  // Enforced here, not just in the UI: insufficient evidence can never be
+  // forwarded to an authority, however the request was made.
+  if (deriveTriage(incident.ruleVerdict, incident.evidenceConfidenceOverall) === "insufficient") {
+    return fail("This incident's evidence is insufficient — it cannot be submitted to an authority.", 422);
+  }
   if (!incident.authority) {
     return fail("External submission unavailable — no authority is registered for this incident's location and type.", 422);
   }

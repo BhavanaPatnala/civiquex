@@ -71,7 +71,9 @@ export const GET = withApiHandler(async (req: Request) => {
         roadSegment: true,
         authority: { select: { id: true, name: true } },
         hotspot: { select: { id: true, incidentCount: true } },
-        observations: { select: { id: true } },
+        observations: {
+          select: { id: true, observation: { select: { media: { select: { kind: true, storageRef: true } } } } },
+        },
       },
     }),
     prisma.incident.count({ where }),
@@ -81,24 +83,33 @@ export const GET = withApiHandler(async (req: Request) => {
     total,
     limit: q.limit,
     offset: q.offset,
-    incidents: incidents.map((inc) => ({
-      id: inc.id,
-      publicId: inc.publicId,
-      incidentType: inc.incidentType,
-      status: inc.status,
-      riskLevel: inc.riskLevel,
-      evidenceConfidence: inc.evidenceConfidenceOverall,
-      evidenceConfidenceOverall: inc.evidenceConfidenceOverall,
-      evidenceConfidenceBreakdown: JSON.parse(inc.evidenceConfidenceBreakdown),
-      ruleVerdict: inc.ruleVerdict,
-      recurring: inc.recurring,
-      observationCount: inc.observations.length,
-      location: inc.location ? { lat: inc.location.lat, lng: inc.location.lng, address: inc.location.address } : null,
-      roadSegment: inc.roadSegment ? { id: inc.roadSegment.id, name: inc.roadSegment.name } : null,
-      authority: inc.authority,
-      hotspotIncidentCount: inc.hotspot?.incidentCount ?? null,
-      createdAt: inc.createdAt,
-      updatedAt: inc.updatedAt,
-    })),
+    incidents: incidents.map((inc) => {
+      // Demo-seeded/simulated observations carry synthetic media refs with no
+      // real bytes behind them (see MediaPreview's same check in
+      // evidence-timeline.tsx) — only a genuine "/api/media/..." ref (routed
+      // through the session-gated proxy) is safe to render as a thumbnail.
+      const thumbnailMedia = inc.observations.map((o) => o.observation.media).find((m) => m?.storageRef.startsWith("/api/media/"));
+
+      return {
+        id: inc.id,
+        publicId: inc.publicId,
+        incidentType: inc.incidentType,
+        status: inc.status,
+        riskLevel: inc.riskLevel,
+        evidenceConfidence: inc.evidenceConfidenceOverall,
+        evidenceConfidenceOverall: inc.evidenceConfidenceOverall,
+        evidenceConfidenceBreakdown: JSON.parse(inc.evidenceConfidenceBreakdown),
+        ruleVerdict: inc.ruleVerdict,
+        recurring: inc.recurring,
+        observationCount: inc.observations.length,
+        thumbnail: thumbnailMedia ? { kind: thumbnailMedia.kind, url: thumbnailMedia.storageRef } : null,
+        location: inc.location ? { lat: inc.location.lat, lng: inc.location.lng, address: inc.location.address } : null,
+        roadSegment: inc.roadSegment ? { id: inc.roadSegment.id, name: inc.roadSegment.name } : null,
+        authority: inc.authority,
+        hotspotIncidentCount: inc.hotspot?.incidentCount ?? null,
+        createdAt: inc.createdAt,
+        updatedAt: inc.updatedAt,
+      };
+    }),
   });
 });

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
 import { ok, fail, withApiHandler } from "@/lib/api/respond";
 import { createObservation } from "@/lib/services/observationPipeline";
-import { saveBase64Media } from "@/lib/api/media";
+import { recordDirectUpload, saveBase64Media } from "@/lib/api/media";
 import { INCIDENT_TYPES } from "@/lib/types";
 import type { Detection, VisionResult } from "@/lib/ai/vision";
 
@@ -28,7 +28,16 @@ const bodySchema = z.object({
   capturedAt: z.coerce.date(),
   orientationDeg: z.coerce.number().min(0).max(360).optional(),
   gpsAccuracyMeters: z.coerce.number().min(0).max(500).optional(),
-  mediaBase64: z.string().min(1),
+  // Small captures still ride along as base64 JSON. Anything too large for
+  // that (video, in particular — see lib/client/uploadMedia.ts) instead
+  // uploads directly from the browser to Blob first, and only its URL +
+  // content hash land here.
+  mediaBase64: z.string().min(1).optional(),
+  mediaBlobUrl: z.string().url().optional(),
+  mediaContentHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   mediaType: z.enum(ALLOWED_TYPES as [string, ...string[]]),
   // Real, client-side TensorFlow.js (COCO-SSD) + Sobel road-anomaly detection,
   // run on the actual captured frame — see useRoadPatrolDetector. When
@@ -81,7 +90,13 @@ export const POST = withApiHandler(async (req: Request) => {
 
   let media;
   try {
-    media = await saveBase64Media(body.mediaBase64, body.mediaType, MAX_FILE_BYTES);
+    if (body.mediaBlobUrl && body.mediaContentHash) {
+      media = await recordDirectUpload(body.mediaBlobUrl, body.mediaContentHash);
+    } else if (body.mediaBase64) {
+      media = await saveBase64Media(body.mediaBase64, body.mediaType, MAX_FILE_BYTES);
+    } else {
+      return fail("No media payload provided", 422);
+    }
   } catch (err) {
     return fail(err instanceof Error ? err.message : "Invalid media payload", 422);
   }

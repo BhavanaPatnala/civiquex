@@ -34,8 +34,15 @@ const RISK_COLOR: Record<string, string> = {
   CRITICAL: "#dc2626",
 };
 
-const TILE_URL = process.env.NEXT_PUBLIC_MAP_TILE_URL ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const ATTRIBUTION = process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ?? "© OpenStreetMap contributors";
+// tile.openstreetmap.org's own usage policy does not permit direct embedding
+// in third-party apps at any real scale, and — the concrete symptom we hit —
+// it doesn't send the CORS headers WebGL needs to use a tile as a texture,
+// so tiles fetch but silently fail to decode. CARTO's free basemaps are
+// built for exactly this kind of embedding and send proper CORS headers;
+// "dark_all" also matches this app's actual theme instead of a plain light
+// raster on a dark page.
+const TILE_URL = process.env.NEXT_PUBLIC_MAP_TILE_URL ?? "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png";
+const ATTRIBUTION = process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ?? "© OpenStreetMap contributors © CARTO";
 
 const STYLE: maplibregl.StyleSpecification = {
   version: 8,

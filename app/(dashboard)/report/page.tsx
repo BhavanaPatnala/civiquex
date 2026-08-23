@@ -20,7 +20,8 @@ import { ShutterButton } from "@/components/domain/shutter-button";
 import { useGeolocation } from "@/lib/client/useGeolocation";
 import { useSession } from "@/lib/client/useSession";
 import { useRoadPatrolDetector } from "@/lib/client/useRoadPatrolDetector";
-import { apiGet, apiPost, blobToBase64, ApiError } from "@/lib/client/api";
+import { apiGet, apiPost, ApiError } from "@/lib/client/api";
+import { prepareMediaForUpload } from "@/lib/client/uploadMedia";
 import { useToast } from "@/components/ui/toast-provider";
 import { INCIDENT_TYPES } from "@/lib/types";
 import { cn, titleCase, formatDateTime } from "@/lib/utils";
@@ -288,10 +289,13 @@ function ReportPageInner() {
         });
       }
 
+      setProcessingLabel(isVideo ? "Uploading video evidence…" : "Correlating, checking applicable rules, and computing evidence…");
+      const prepared = await prepareMediaForUpload(blob, blob.type || "image/jpeg");
       setProcessingLabel("Correlating, checking applicable rules, and computing evidence…");
-      const mediaBase64 = await blobToBase64(blob);
       const res = await apiPost<{ observationId: string; incidentId: string; isNewIncident: boolean }>("/api/observations", {
-        mediaBase64,
+        mediaBase64: prepared.mediaBase64,
+        mediaBlobUrl: prepared.mediaBlobUrl,
+        mediaContentHash: prepared.mediaContentHash,
         mediaType: blob.type || "image/jpeg",
         incidentTypeGuess: incidentType,
         lat: coords.lat,

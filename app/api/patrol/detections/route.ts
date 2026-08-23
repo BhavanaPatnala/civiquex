@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/auth";
 import { ok, fail, withApiHandler } from "@/lib/api/respond";
 import { reverseGeocode } from "@/lib/services/geocode";
 import { findContractMatch } from "@/lib/services/contractService";
-import { saveBase64Media } from "@/lib/api/media";
+import { recordDirectUpload, saveBase64Media } from "@/lib/api/media";
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
@@ -24,7 +24,12 @@ const bodySchema = z.object({
   gpsAccuracyMeters: z.coerce.number().min(0).max(500).optional(),
   capturedAt: z.coerce.date(),
   notes: z.string().max(500).optional(),
-  mediaBase64: z.string().min(1),
+  mediaBase64: z.string().min(1).optional(),
+  mediaBlobUrl: z.string().url().optional(),
+  mediaContentHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   mediaType: z.enum(["image/jpeg", "image/png", "image/webp"]),
   detectionSummary: detectionSummarySchema,
 });
@@ -35,7 +40,13 @@ export const POST = withApiHandler(async (req: Request) => {
 
   let media;
   try {
-    media = await saveBase64Media(body.mediaBase64, body.mediaType, MAX_FILE_BYTES);
+    if (body.mediaBlobUrl && body.mediaContentHash) {
+      media = await recordDirectUpload(body.mediaBlobUrl, body.mediaContentHash);
+    } else if (body.mediaBase64) {
+      media = await saveBase64Media(body.mediaBase64, body.mediaType, MAX_FILE_BYTES);
+    } else {
+      return fail("No media payload provided", 422);
+    }
   } catch (err) {
     return fail(err instanceof Error ? err.message : "Invalid media payload", 422);
   }

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { put } from "@vercel/blob";
+import { head, put } from "@vercel/blob";
 
 // Route Handlers here accept media as base64-encoded JSON rather than
 // multipart/form-data. Next.js 14.2's Route Handler `request.formData()`
@@ -86,5 +86,41 @@ export async function saveBase64Media(base64: string, mimeType: string, maxBytes
     blobUrl,
     kind: mimeType.startsWith("video") ? "video" : "image",
     bytes: bytes.length,
+  };
+}
+
+/**
+ * Records evidence media the browser already uploaded directly to Blob (see
+ * lib/client/uploadMedia.ts) — the path large captures (video especially)
+ * must take, since routing their bytes through this app's own API route,
+ * even as base64, hits Vercel's ~4.5MB serverless request-body limit. No
+ * bytes pass through this function. It only reads the blob's real metadata
+ * back from Vercel Blob (server-authoritative, unlike anything the client
+ * claims) and checks its pathname matches the expected content-hash path —
+ * a client can only have produced that pathname by successfully uploading
+ * through our own token-gated /api/media/upload-token route in the first
+ * place, so this rejects a client just naming an arbitrary URL.
+ */
+export async function recordDirectUpload(blobUrl: string, expectedHash: string): Promise<SavedMedia> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    throw new Error("Media storage isn't configured for this deployment: BLOB_READ_WRITE_TOKEN is missing.");
+  }
+
+  const meta = await head(blobUrl);
+  const ext = EXT_BY_MIME[meta.contentType];
+  if (!ext) throw new Error(`Unsupported media type: ${meta.contentType}`);
+
+  const filename = `${expectedHash}.${ext}`;
+  if (!meta.pathname.endsWith(`uploads/${filename}`)) {
+    throw new Error("Uploaded media does not match the expected content hash");
+  }
+
+  return {
+    hash: expectedHash,
+    filename,
+    storageRef: `/api/media/${filename}`,
+    blobUrl: meta.url,
+    kind: meta.contentType.startsWith("video") ? "video" : "image",
+    bytes: meta.size,
   };
 }

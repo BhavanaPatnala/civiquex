@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, Circle, MapPin, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Circle, MapPin, ShieldCheck, Video } from "lucide-react";
 import { cn, formatDateTime, titleCase } from "@/lib/utils";
 import { deriveTriage, evidenceScoreOf, verificationChecklist, TRIAGE_LABEL, type Triage } from "@/lib/presentation/triage";
 
@@ -21,6 +21,35 @@ export interface EvidenceCardIncident {
   location: { address: string } | null;
   roadSegment: { name: string } | null;
   createdAt: string;
+  thumbnail?: { kind: string; url: string } | null;
+}
+
+function EvidenceThumbnail({ thumbnail }: { thumbnail: EvidenceCardIncident["thumbnail"] }) {
+  // Demo-seeded/simulated observations carry synthetic media refs with no
+  // real bytes behind them — the API only ever sends a thumbnail when it
+  // found a genuine "/api/media/..." ref, so a present thumbnail is always
+  // safe to render here (no separate honesty check needed on this side).
+  if (!thumbnail) {
+    return (
+      <div className="mx-5 mt-4 flex h-32 items-center justify-center rounded-lg bg-muted/70">
+        <ShieldCheck className="h-5 w-5 text-muted-foreground/50" />
+      </div>
+    );
+  }
+  if (thumbnail.kind === "video") {
+    return (
+      <div className="relative mx-5 mt-4 h-32 overflow-hidden rounded-lg bg-black">
+        <video src={thumbnail.url} muted preload="metadata" className="h-full w-full object-cover" />
+        <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+          <Video className="h-3 w-3" /> Video
+        </span>
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={thumbnail.url} alt="Evidence" className="mx-5 mt-4 h-32 w-full rounded-lg object-cover" />
+  );
 }
 
 export function EvidenceCard({
@@ -58,10 +87,7 @@ export function EvidenceCard({
         </div>
       </div>
 
-      {/* Best-evidence frame placeholder — real media where available, honest fallback otherwise */}
-      <div className="mx-5 mt-4 flex h-32 items-center justify-center rounded-lg bg-muted/70">
-        <ShieldCheck className="h-5 w-5 text-muted-foreground/50" />
-      </div>
+      <EvidenceThumbnail thumbnail={incident.thumbnail} />
 
       <div className="flex flex-col gap-1 px-5 pt-4 text-[13px]">
         <div className="flex items-center gap-1.5 text-foreground">

@@ -23,7 +23,8 @@ import { Input } from "@/components/ui/input";
 import { ShutterButton } from "@/components/domain/shutter-button";
 import { useSession } from "@/lib/client/useSession";
 import { useRoadPatrolDetector, type PatrolFrameResult } from "@/lib/client/useRoadPatrolDetector";
-import { apiPost, apiGet, blobToBase64, ApiError } from "@/lib/client/api";
+import { apiPost, apiGet, ApiError } from "@/lib/client/api";
+import { prepareMediaForUpload } from "@/lib/client/uploadMedia";
 import { useToast } from "@/components/ui/toast-provider";
 import { cn, formatPercent } from "@/lib/utils";
 
@@ -280,9 +281,11 @@ export default function PatrolPage() {
     }
     setCapturing(true);
     try {
-      const mediaBase64 = await blobToBase64(mediaBlob);
+      const prepared = await prepareMediaForUpload(mediaBlob, mediaBlob.type || "image/jpeg");
       const res = await apiPost<CandidateResult>("/api/patrol/detections", {
-        mediaBase64,
+        mediaBase64: prepared.mediaBase64,
+        mediaBlobUrl: prepared.mediaBlobUrl,
+        mediaContentHash: prepared.mediaContentHash,
         mediaType: mediaBlob.type || "image/jpeg",
         lat: effectiveCoords.lat,
         lng: effectiveCoords.lng,

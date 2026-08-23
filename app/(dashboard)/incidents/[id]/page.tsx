@@ -38,7 +38,7 @@ interface IncidentDetail {
   updatedAt: string;
   location: { lat: number; lng: number; address: string } | null;
   roadSegment: { id: string; name: string; roadClass: string; schoolNearby: boolean; hospitalNearby: boolean; junctionType: string | null } | null;
-  authority: { id: string; name: string; jurisdiction: string; submissionMethod: string; officialUrl: string | null } | null;
+  authority: { id: string; name: string; jurisdiction: string; submissionMethod: string; officialUrl: string | null; evidenceRequirements: string } | null;
   hotspot: { id: string; incidentCount: number; recurringCount: number; avgDurationMinutes: number | null } | null;
   observations: EvidenceObservation[];
   submissions: {
@@ -363,6 +363,7 @@ export default function IncidentDetailPage() {
             <div className="text-sm">
               <span className="font-medium">{incident.authority.name}</span>
               <span className="text-muted-foreground"> — {incident.authority.jurisdiction}</span>
+              <p className="mt-1 text-xs text-muted-foreground">{incident.authority.evidenceRequirements}</p>
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">No registered authority covers this location and incident type yet.</p>

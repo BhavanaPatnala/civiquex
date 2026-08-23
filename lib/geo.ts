@@ -62,6 +62,19 @@ export function pointInPolygon(point: LatLng, polygon: [number, number][]): bool
   return inside;
 }
 
+/** Rough bounding-box area of a polygon, in square degrees — good enough to rank "how specific is this jurisdiction" (a tight zone boundary vs. a broad state-wide fallback), not for real area calculations. */
+export function polygonBoundingBoxArea(polygon: [number, number][]): number {
+  if (polygon.length === 0) return Infinity;
+  let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const [lng, lat] of polygon) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  return (maxLng - minLng) * (maxLat - minLat);
+}
+
 /** Point-to-polyline min distance in meters (approx, for road-segment matching). */
 export function distanceToPolyline(point: LatLng, line: [number, number][]): number {
   let min = Infinity;

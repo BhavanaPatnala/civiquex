@@ -23,7 +23,9 @@ export const POST = withApiHandler(async (_req: Request, { params }: { params: {
   if (existing) return fail("This incident has already been submitted", 409);
 
   const authorityCode = incident.authority.name
+    .replace(/[^A-Za-z0-9 ]/g, "")
     .split(" ")
+    .filter(Boolean)
     .map((w) => w[0])
     .join("")
     .toUpperCase()

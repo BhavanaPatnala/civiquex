@@ -19,6 +19,7 @@ import { createObservation } from "../lib/services/observationPipeline";
 import { runResolutionCheck } from "../lib/services/resolutionService";
 import { recordRoutingFeedback, resolveIncidentAuthority } from "../lib/services/authorityService";
 import { runVisionInference } from "../lib/ai/vision";
+import { INCIDENT_TYPES } from "../lib/types";
 
 const prisma = new PrismaClient();
 
@@ -423,6 +424,33 @@ async function main() {
   });
   await prisma.authorityBoundary.create({
     data: { authorityId: schoolZoneCell.id, name: "Chennai city boundary", geojson: JSON.stringify(rect(80.2, 12.85, 80.28, 13.1)) },
+  });
+
+  // Fallback for anywhere outside the specifically-mapped Chennai zones
+  // above. This is deliberately NOT presented as a verified department for
+  // the exact reported location — its name and evidenceRequirements say so
+  // plainly — it exists so a real submission from anywhere still has
+  // somewhere to go, rather than every out-of-area report silently dead-
+  // ending. It never claims precision it doesn't have.
+  const generalFallback = await prisma.authority.create({
+    data: {
+      name: "General Traffic Enforcement (unmapped jurisdiction)",
+      jurisdiction: "Outside the specific zones this demo has mapped",
+      supportedIncidentTypesJson: JSON.stringify(INCIDENT_TYPES.map((t) => t.code)),
+      officialUrl: null,
+      apiAvailable: false,
+      apiDocumentation: null,
+      submissionMethod: "assisted_manual",
+      authenticationMethod: null,
+      requiredFieldsJson: JSON.stringify(["photo_or_video", "location", "description"]),
+      evidenceRequirements:
+        "This location falls outside the specific authority boundaries this demo has registered — routing is a general placeholder, not a verified match to a real department for this exact address.",
+      escalationMethod: null,
+      statusTrackingAvailable: false,
+    },
+  });
+  await prisma.authorityBoundary.create({
+    data: { authorityId: generalFallback.id, name: "India (broad fallback)", geojson: JSON.stringify(rect(68, 6, 97.5, 37)) },
   });
 
   // ---------------------------------------------------------------------

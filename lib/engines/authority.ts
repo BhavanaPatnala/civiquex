@@ -14,7 +14,7 @@
 // so routing is auditable, never a black box.
 // ---------------------------------------------------------------------------
 
-import { pointInPolygon, type LatLng } from "@/lib/geo";
+import { pointInPolygon, polygonBoundingBoxArea, type LatLng } from "@/lib/geo";
 
 export interface AuthorityCandidate {
   id: string;
@@ -51,7 +51,18 @@ export function resolveAuthority(input: {
 }): AuthorityResolutionResult {
   const trail: string[] = [];
 
-  const geoMatches = input.authorities.filter((a) => a.boundaries.some((poly) => pointInPolygon(input.point, poly)));
+  // Track each matching authority's smallest matching boundary (in degrees²)
+  // so a tight, specific zone always outranks a broad catch-all that
+  // happens to also cover the point (e.g. a state-wide fallback boundary
+  // necessarily contains every city zone within it too).
+  const specificity = new Map<string, number>();
+  for (const a of input.authorities) {
+    const matchedAreas = a.boundaries.filter((poly) => pointInPolygon(input.point, poly)).map(polygonBoundingBoxArea);
+    if (matchedAreas.length > 0) specificity.set(a.id, Math.min(...matchedAreas));
+  }
+  const geoMatches = input.authorities
+    .filter((a) => specificity.has(a.id))
+    .sort((a, b) => specificity.get(a.id)! - specificity.get(b.id)!);
   trail.push(
     geoMatches.length > 0
       ? `Jurisdiction lookup: location falls within ${geoMatches.length} registered boundary/boundaries (${geoMatches.map((a) => a.name).join(", ")}).`

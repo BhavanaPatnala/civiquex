@@ -54,8 +54,12 @@ describe("Authority Resolution Engine", () => {
     expect(result.authorityId).toBeNull();
   });
 
-  it("learns from repeated 'wrong department' redirects and routes future reports directly to the correct authority", () => {
-    // Without history: falls back to whichever candidate is listed first.
+  it("prefers the more specific (tighter-boundary) jurisdiction over a broader one that also covers the point", () => {
+    // municipal's boundary is a small zone inside trafficPolice's larger
+    // city-wide boundary — both cover this point, but the zone-specific
+    // authority is the more sensible default, not just whichever was listed
+    // first (a broad fallback authority covering an entire state, say,
+    // should never outrank a tight, specific zone it happens to contain).
     const before = resolveAuthority({
       point: { lat: 13.04, lng: 80.23 },
       incidentType: "footpath_obstruction",
@@ -63,13 +67,18 @@ describe("Authority Resolution Engine", () => {
       authorities: [trafficPolice, municipal],
       feedback: [],
     });
-    expect(before.authorityId).toBe(trafficPolice.id);
+    expect(before.authorityId).toBe(municipal.id);
     expect(before.learnedOverride).toBe(false);
+  });
 
+  it("learns from repeated 'wrong department' redirects and routes future reports directly to the correct authority", () => {
+    // municipal is the specificity-based default (see test above) — this
+    // exercises learning an override AWAY from that default, to the
+    // broader authority, once redirect feedback consistently says so.
     const feedback: RoutingFeedbackRecord[] = Array.from({ length: 4 }, () => ({
-      authorityId: trafficPolice.id,
+      authorityId: municipal.id,
       outcome: "redirected",
-      redirectedToId: municipal.id,
+      redirectedToId: trafficPolice.id,
       roadSegmentId: "road-x",
       incidentType: "footpath_obstruction",
     }));
@@ -82,9 +91,29 @@ describe("Authority Resolution Engine", () => {
       feedback,
     });
 
-    expect(after.authorityId).toBe(municipal.id);
+    expect(after.authorityId).toBe(trafficPolice.id);
     expect(after.learnedOverride).toBe(true);
     expect(after.decisionTrail.some((line) => line.includes("redirected"))).toBe(true);
+  });
+
+  it("a broad state-wide fallback never outranks a tight zone it happens to contain", () => {
+    const broadFallback: AuthorityCandidate = {
+      id: "general-fallback",
+      name: "General Traffic Enforcement (unmapped jurisdiction)",
+      jurisdiction: "Everywhere the demo hasn't specifically mapped",
+      supportedIncidentTypes: ["footpath_obstruction"],
+      boundaries: [rect(68, 6, 97.5, 37)], // roughly all of India
+      apiAvailable: false,
+      submissionMethod: "assisted_manual",
+    };
+    const result = resolveAuthority({
+      point: { lat: 13.04, lng: 80.23 }, // inside municipal's tight zone, and also inside the broad fallback
+      incidentType: "footpath_obstruction",
+      roadSegmentId: "road-x",
+      authorities: [broadFallback, municipal], // fallback listed FIRST — order must not matter
+      feedback: [],
+    });
+    expect(result.authorityId).toBe(municipal.id);
   });
 
   it("keeps routing decisions auditable — every resolution returns a non-empty, human-readable decision trail", () => {

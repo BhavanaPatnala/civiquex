@@ -1,0 +1,515 @@
+// CiviqueX — Road Safety Evidence & Accountability Platform
+// Hosted PostgreSQL (e.g. Neon / Vercel Postgres) — chosen so the app can run
+// on Vercel's serverless platform, which has no persistent local filesystem
+// for a SQLite file to live on. Geometries are still stored as GeoJSON text /
+// lat-lng floats with spatial queries done in TypeScript (see lib/geo.ts)
+// rather than PostGIS, to keep the schema itself engine-agnostic.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+// "Enum" columns are kept as plain strings (not Prisma `enum` blocks) so this
+// schema stays portable across engines; the allowed values are enforced in
+// the TypeScript layer (lib/types.ts and each model's Zod schema).
+// UserRole: "CITIZEN" | "AUTHORITY" | "ADMIN"
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("CITIZEN")
+  authorityId  String? // set when role = AUTHORITY: which authority they act for
+  createdAt    DateTime @default(now())
+
+  observations      Observation[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  patrolDetections  PatrolDetection[]
+  authority         Authority?        @relation(fields: [authorityId], references: [id])
+
+  @@index([authorityId])
+}
+
+// ---------------------------------------------------------------------------
+// Geography / jurisdiction
+// ---------------------------------------------------------------------------
+
+model RoadSegment {
+  id             String   @id @default(cuid())
+  name           String
+  city           String
+  ward           String?
+  geometryJson   String // GeoJSON LineString, demo-authored
+  roadClass      String // arterial | collector | local | school_zone | junction
+  schoolNearby   Boolean  @default(false)
+  hospitalNearby Boolean  @default(false)
+  junctionType   String? // signalized | unsignalized | roundabout | none
+  authorityId    String?
+
+  authority    Authority?    @relation(fields: [authorityId], references: [id])
+  locations    Location[]
+  incidents    Incident[]
+  hotspots     Hotspot[]
+  observations Observation[]
+
+  @@index([authorityId])
+}
+
+model Location {
+  id            String   @id @default(cuid())
+  lat           Float
+  lng           Float
+  address       String
+  roadSegmentId String?
+  createdAt     DateTime @default(now())
+
+  roadSegment  RoadSegment?  @relation(fields: [roadSegmentId], references: [id])
+  observations Observation[]
+  incidents    Incident[]
+  hotspots     Hotspot[]
+
+  @@index([roadSegmentId])
+  @@index([lat, lng])
+}
+
+// ---------------------------------------------------------------------------
+// Rules (context/rule engine knowledge base)
+// ---------------------------------------------------------------------------
+
+model Rule {
+  id               String   @id @default(cuid())
+  code             String   @unique // e.g. "TN-MVR-2019-113"
+  incidentType     String
+  description      String
+  conditionsJson   String // { timeWindows, roadClasses, exceptions, ... }
+  authoritySource  String // citation of the regulation
+  version          Int      @default(1)
+  createdAt        DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Authority registry
+// ---------------------------------------------------------------------------
+
+model Authority {
+  id                        String   @id @default(cuid())
+  name                      String
+  jurisdiction              String
+  supportedIncidentTypesJson String // string[]
+  officialUrl               String?
+  apiAvailable              Boolean  @default(false)
+  apiDocumentation          String?
+  submissionMethod          String // "official_api" | "assisted_manual" | "unavailable"
+  authenticationMethod      String?
+  requiredFieldsJson        String // string[]
+  evidenceRequirements      String
+  escalationMethod          String?
+  statusTrackingAvailable   Boolean  @default(false)
+  createdAt                 DateTime @default(now())
+
+  boundaries    AuthorityBoundary[]
+  roadSegments  RoadSegment[]
+  incidents     Incident[]
+  submissions   Submission[]
+  users         User[]
+  routingEvents RoutingFeedback[]
+}
+
+model AuthorityBoundary {
+  id          String @id @default(cuid())
+  authorityId String
+  name        String
+  geojson     String // GeoJSON Polygon
+
+  authority Authority @relation(fields: [authorityId], references: [id])
+
+  @@index([authorityId])
+}
+
+// Auditable authority-routing feedback learning. Every time a submission is
+// accepted or redirected by an authority, we log it here keyed by road
+// segment + incident type. The routing engine reads this table (never a
+// black box) to bias future jurisdiction resolution — see lib/engines/authority.ts.
+model RoutingFeedback {
+  id            String   @id @default(cuid())
+  roadSegmentId String?
+  incidentType  String
+  authorityId   String
+  outcome       String // "accepted" | "redirected"
+  redirectedToId String?
+  createdAt     DateTime @default(now())
+
+  authority Authority @relation(fields: [authorityId], references: [id])
+
+  @@index([roadSegmentId, incidentType])
+}
+
+// ---------------------------------------------------------------------------
+// Vehicles (fingerprint-first, plate optional & hashed — privacy-first evidence)
+// ---------------------------------------------------------------------------
+
+model Vehicle {
+  id             String   @id @default(cuid())
+  fingerprintHash String  @unique // derived from color+type+visual features, NOT identity
+  typeClass      String // two_wheeler | car | auto | lcv | hcv | bus
+  colorClass     String
+  plateHash      String? // SHA-256 of plate, only if legally captured; never raw plate text
+  createdAt      DateTime @default(now())
+
+  observations Observation[]
+
+  @@index([plateHash])
+}
+
+// ---------------------------------------------------------------------------
+// Observations — the atomic unit. Each is an independent claim of evidence.
+// ---------------------------------------------------------------------------
+
+// SourceType: "CITIZEN" | "DASHCAM" | "AUTHORIZED_SENSOR"
+// ObservationStatus: "PENDING_PROCESSING" | "PROCESSED" | "REJECTED_LOW_QUALITY"
+
+model Observation {
+  id                String            @id @default(cuid())
+  userId            String?
+  vehicleId         String?
+  sourceType        String
+  observerHash      String // privacy-preserving observer identifier, not the raw user id
+  incidentTypeGuess String
+  capturedAt        DateTime
+  lat               Float
+  lng               Float
+  orientationDeg    Float?
+  roadSegmentId     String?
+  locationId        String?
+
+  // Simulated CV pipeline output (see lib/ai/vision.ts) — always tagged
+  // with model + version so nothing is presented as ground truth.
+  sceneDescriptorJson    String // JSON feature vector (demo)
+  objectDetectionsJson   String // JSON array of {label confidence bbox}
+  visionModel            String
+  visionModelVersion     String
+
+  status String @default("PENDING_PROCESSING")
+
+  mediaId String? @unique
+
+  createdAt DateTime @default(now())
+
+  user             User?              @relation(fields: [userId], references: [id])
+  vehicle          Vehicle?           @relation(fields: [vehicleId], references: [id])
+  roadSegment      RoadSegment?       @relation(fields: [roadSegmentId], references: [id])
+  location         Location?          @relation(fields: [locationId], references: [id])
+  media             Evidence?          @relation("ObservationMedia", fields: [mediaId], references: [id])
+  incidentLinks    IncidentObservation[]
+  resolutionBefore ResolutionCheck[]  @relation("BeforeObservation")
+  resolutionAfter  ResolutionCheck[]  @relation("AfterObservation")
+
+  @@index([lat, lng])
+  @@index([capturedAt])
+  @@index([roadSegmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Evidence (media) — privacy-first storage record
+// ---------------------------------------------------------------------------
+
+model Evidence {
+  id             String   @id @default(cuid())
+  kind           String // "video" | "image"
+  storageRef     String // app-facing reference — always "/api/media/<filename>", the session-gated + audit-logged proxy route
+  blobUrl        String? // real object-store URL (Vercel Blob) the proxy route fetches from; null when running on local disk storage
+  facesBlurred   Boolean  @default(true)
+  encrypted      Boolean  @default(true)
+  contentHash    String
+  retentionUntil DateTime
+  createdAt      DateTime @default(now())
+
+  observation     Observation?     @relation("ObservationMedia")
+  patrolDetection PatrolDetection? @relation("PatrolMedia")
+  accessLogs      EvidenceAccessLog[]
+}
+
+model EvidenceAccessLog {
+  id         String   @id @default(cuid())
+  evidenceId String
+  actorId    String?
+  action     String // "view" | "download" | "export"
+  occurredAt DateTime @default(now())
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id])
+
+  @@index([evidenceId])
+}
+
+// ---------------------------------------------------------------------------
+// Incidents — the correlated graph node
+// ---------------------------------------------------------------------------
+
+// IncidentStatus: "OBSERVED" | "EVIDENCE_VALIDATED" | "SUBMITTED" |
+//   "AUTHORITY_ACKNOWLEDGED" | "ACTION_REPORTED" | "INDEPENDENT_VERIFICATION" |
+//   "RESOLVED" | "STILL_PRESENT" | "REOPENED"
+// RiskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+
+model Incident {
+  id           String   @id @default(cuid())
+  publicId     String   @unique // INC-2026-000124
+  incidentType String
+  status       String   @default("OBSERVED")
+  riskLevel    String   @default("LOW")
+
+  evidenceConfidenceOverall   Float // 0-1
+  evidenceConfidenceBreakdown String // JSON: {visual, location, temporal, rule, scene, corroboration}
+
+  ruleId        String?
+  ruleVerdict   String // "potential_violation" | "evidence_insufficient" | "requires_verification"
+  ruleReasoning String // human-readable explanation
+
+  locationId    String?
+  roadSegmentId String?
+  authorityId   String?
+
+  recurring Boolean  @default(false)
+  hotspotId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  location    Location?     @relation(fields: [locationId], references: [id])
+  roadSegment RoadSegment?  @relation(fields: [roadSegmentId], references: [id])
+  authority   Authority?    @relation(fields: [authorityId], references: [id])
+  hotspot     Hotspot?      @relation(fields: [hotspotId], references: [id])
+
+  observations     IncidentObservation[]
+  submissions      Submission[]
+  resolutionChecks ResolutionCheck[]
+  riskScores       RiskScore[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+
+  @@index([status])
+  @@index([riskLevel])
+  @@index([locationId])
+  @@index([roadSegmentId])
+  @@index([hotspotId])
+}
+
+// Edge table for the incident graph: which observations were correlated
+// into this incident, and why (the correlation engine's own explanation).
+model IncidentObservation {
+  id                  String   @id @default(cuid())
+  incidentId          String
+  observationId       String
+  correlationScore    Float // 0-1 confidence this observation belongs to the incident
+  correlationFactorsJson String // JSON: {temporal, spatial, trajectory, scene, appearance, plate}
+  addedAt             DateTime @default(now())
+
+  incident    Incident    @relation(fields: [incidentId], references: [id])
+  observation Observation @relation(fields: [observationId], references: [id])
+
+  @@unique([incidentId, observationId])
+  @@index([observationId])
+}
+
+// ---------------------------------------------------------------------------
+// Submission to authority + lifecycle events (transparent, auditable)
+// ---------------------------------------------------------------------------
+
+model Submission {
+  id              String   @id @default(cuid())
+  incidentId      String
+  authorityId     String
+  channel         String // "official_api" | "assisted_manual" | "unavailable"
+  referenceNumber String?
+  status          String // "pending" | "acknowledged" | "redirected" | "action_reported" | "closed"
+  submittedAt     DateTime @default(now())
+
+  incident  Incident            @relation(fields: [incidentId], references: [id])
+  authority Authority           @relation(fields: [authorityId], references: [id])
+  events    SubmissionEvent[]
+
+  @@index([incidentId])
+}
+
+model SubmissionEvent {
+  id                  String   @id @default(cuid())
+  submissionId        String
+  eventType           String // "acknowledged" | "redirected" | "action_reported" | "closed"
+  note                String?
+  redirectedToId      String?
+  occurredAt          DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+}
+
+// ---------------------------------------------------------------------------
+// Resolution verification
+// ---------------------------------------------------------------------------
+
+model ResolutionCheck {
+  id                    String   @id @default(cuid())
+  incidentId            String
+  checkedAt             DateTime @default(now())
+  beforeObservationId   String
+  afterObservationId    String?
+  similarityScore       Float? // scene similarity 0-1
+  objectPresenceDeltaJson String // JSON describing what changed
+  result                String // "likely_resolved" | "still_present" | "inconclusive"
+  confidence            Float
+
+  incident           Incident     @relation(fields: [incidentId], references: [id])
+  beforeObservation  Observation  @relation("BeforeObservation", fields: [beforeObservationId], references: [id])
+  afterObservation   Observation? @relation("AfterObservation", fields: [afterObservationId], references: [id])
+
+  @@index([incidentId])
+}
+
+// ---------------------------------------------------------------------------
+// Hotspots (recurring incident engine)
+// ---------------------------------------------------------------------------
+
+model Hotspot {
+  id                 String   @id @default(cuid())
+  locationId         String?
+  roadSegmentId      String?
+  incidentType       String
+  incidentCount      Int      @default(0)
+  recurringCount     Int      @default(0)
+  avgDurationMinutes Float?
+  riskLevel          String @default("MEDIUM")
+  firstSeenAt        DateTime
+  lastSeenAt         DateTime
+
+  location    Location?    @relation(fields: [locationId], references: [id])
+  roadSegment RoadSegment? @relation(fields: [roadSegmentId], references: [id])
+  incidents   Incident[]
+
+  @@index([roadSegmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Risk scores (versioned, explainable)
+// ---------------------------------------------------------------------------
+
+model RiskScore {
+  id          String   @id @default(cuid())
+  incidentId  String
+  factorsJson String // JSON breakdown of contributing factors
+  score       Float // 0-1
+  level       String
+  computedAt  DateTime @default(now())
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+
+  @@index([incidentId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit + notifications
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadataJson String?
+  incidentId String?
+  createdAt  DateTime @default(now())
+
+  actor    User?     @relation(fields: [actorId], references: [id])
+  incident Incident? @relation(fields: [incidentId], references: [id])
+
+  @@index([entityType, entityId])
+}
+
+// ---------------------------------------------------------------------------
+// Contract registry — real government road-work/tender records are not
+// published as an open API anywhere we could verify, so this stays a
+// clearly-labeled DEMO registry (see prisma/seed.ts). Matching against it,
+// however, runs on genuinely real GPS + a real reverse-geocoded road name —
+// only the contract records themselves are demo data.
+// ---------------------------------------------------------------------------
+
+model Contract {
+  id               String   @id @default(cuid())
+  tenderNo         String   @unique
+  contractorName   String
+  contractorEmail  String
+  officerName      String
+  officerEmail     String
+  roadName         String
+  city             String
+  boundaryGeojson  String? // optional GeoJSON polygon [[lng,lat],...] for point-in-polygon matching
+  centerLat        Float?
+  centerLng        Float?
+  radiusMeters     Float? // fallback radius match when no boundary polygon is set
+  keywordsJson     String // JSON string[] — road-name keywords checked against a free-text note
+  workStartDate    DateTime
+  workEndDate      DateTime
+  warrantyEndDate  DateTime // contract is under active warranty while now < warrantyEndDate
+  createdAt        DateTime @default(now())
+
+  patrolDetections PatrolDetection[]
+}
+
+// A single AI Road Patrol detection event: real GPS, a real reverse-geocoded
+// road name, real client-side AI detection output, and (if any) the matched
+// contract. Kept separate from Observation/Incident because a patrol
+// detection is a candidate flagged by an in-browser heuristic pending human
+// confirmation, not yet a submitted observation — confirming one creates a
+// real Observation via the existing pipeline.
+model PatrolDetection {
+  id                 String   @id @default(cuid())
+  userId             String?
+  lat                Float
+  lng                Float
+  gpsAccuracyMeters  Float?
+  capturedAt         DateTime
+  roadName           String? // from live Nominatim reverse geocoding, null if lookup failed/unavailable
+  detectionModel     String // e.g. "coco-ssd@2.2.3" for the neural net, or "road-anomaly-heuristic@1"
+  detectionSummaryJson String // JSON: { objectDetections: [...], anomalyScore, anomalyBbox, inferenceMs }
+  mediaId            String? @unique
+  contractId         String?
+  matchScore         Float?
+  matchedByJson       String? // JSON string[] of match reasons
+  activeWarranty     Boolean  @default(false)
+  status             String   @default("candidate") // "candidate" | "confirmed" | "dismissed"
+  observationId      String?
+  createdAt          DateTime @default(now())
+
+  user     User?     @relation(fields: [userId], references: [id])
+  contract Contract? @relation(fields: [contractId], references: [id])
+  media    Evidence? @relation("PatrolMedia", fields: [mediaId], references: [id])
+
+  @@index([contractId])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  type       String
+  title      String
+  body       String
+  read       Boolean  @default(false)
+  incidentId String?
+  createdAt  DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id])
+  incident Incident? @relation(fields: [incidentId], references: [id])
+
+  @@index([userId, read])
+}

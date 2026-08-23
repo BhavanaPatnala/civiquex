@@ -20,7 +20,7 @@ import { useToast } from "@/components/ui/toast-provider";
 import { formatDateTime, titleCase, cn } from "@/lib/utils";
 import { verificationChecklist, deriveTriage, evidenceScoreOf, TRIAGE_LABEL } from "@/lib/presentation/triage";
 import { alternativeExplanations, unresolvedCount } from "@/lib/presentation/alternatives";
-import { whatHappened, vehicleLine, locationVerifiedLine } from "@/lib/presentation/plainLanguage";
+import { describeCaptured, vehicleLine, locationVerifiedLine } from "@/lib/presentation/plainLanguage";
 
 interface IncidentDetail {
   id: string;
@@ -127,6 +127,7 @@ export default function IncidentDetailPage() {
   const vehicle = incident.observations.find((o) => o.observation.vehicle)?.observation.vehicle ?? null;
   const primaryObservation = incident.observations[0]?.observation;
   const place = incident.roadSegment?.name ?? incident.location?.address ?? "Location unavailable";
+  const captured = describeCaptured(incident.incidentType, primaryObservation ?? null);
   const checks = alternativeExplanations({
     breakdown: incident.evidenceConfidenceBreakdown,
     corroboratingObservations: Math.max(0, incident.observations.length - 1),
@@ -204,7 +205,12 @@ export default function IncidentDetailPage() {
       {/* WHAT / WHERE / WHEN / VEHICLE */}
       <Card>
         <CardContent className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
-          <InfoRow label="What happened" value={whatHappened(incident.incidentType)} full />
+          <InfoRow
+            label="What happened"
+            value={captured.text}
+            full
+            tone={captured.nothingRelevant ? "warning" : "default"}
+          />
           <InfoRow label="Where" value={place} hint={incident.location ? locationVerifiedLine(incident.evidenceConfidenceBreakdown.location) : undefined} />
           <InfoRow label="When" value={primaryObservation ? formatDateTime(primaryObservation.capturedAt) : "—"} />
           <InfoRow label="Vehicle" value={vehicleLine(vehicle)} full />
@@ -416,11 +422,23 @@ export default function IncidentDetailPage() {
   );
 }
 
-function InfoRow({ label, value, hint, full = false }: { label: string; value: string; hint?: string; full?: boolean }) {
+function InfoRow({
+  label,
+  value,
+  hint,
+  full = false,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  full?: boolean;
+  tone?: "default" | "warning";
+}) {
   return (
     <div className={full ? "sm:col-span-2" : undefined}>
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-sm text-foreground">{value}</p>
+      <p className={cn("mt-0.5 text-sm", tone === "warning" ? "text-warning" : "text-foreground")}>{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
     </div>
   );

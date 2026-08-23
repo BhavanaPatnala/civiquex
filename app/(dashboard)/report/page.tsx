@@ -25,7 +25,7 @@ import { useToast } from "@/components/ui/toast-provider";
 import { INCIDENT_TYPES } from "@/lib/types";
 import { cn, titleCase, formatDateTime } from "@/lib/utils";
 import { deriveTriage, TRIAGE_LABEL, type Triage } from "@/lib/presentation/triage";
-import { whatHappened, vehicleLine } from "@/lib/presentation/plainLanguage";
+import { describeCaptured, vehicleLine } from "@/lib/presentation/plainLanguage";
 
 /** Grabs a single decoded frame from a recorded video blob, for running real object detection on a captured clip the same way we do for a photo. */
 function extractVideoFrameBlob(videoBlob: Blob): Promise<Blob | null> {
@@ -80,7 +80,14 @@ interface IncidentResult {
   ruleReasoning: string;
   location: { address: string } | null;
   roadSegment: { name: string } | null;
-  observations: { observation: { capturedAt: string; vehicle: { typeClass: string; colorClass: string } | null } }[];
+  observations: {
+    observation: {
+      capturedAt: string;
+      vehicle: { typeClass: string; colorClass: string } | null;
+      visionModel: string;
+      detections: { label: string; confidence: number }[];
+    };
+  }[];
 }
 
 const CHENNAI_FALLBACK = { lat: 13.045, lng: 80.24 };
@@ -115,7 +122,6 @@ function ReportPageInner() {
   const [incident, setIncident] = useState<IncidentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
-  const [nothingDetected, setNothingDetected] = useState(false);
   const [processingLabel, setProcessingLabel] = useState("Running AI detection on your evidence…");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -234,7 +240,6 @@ function ReportPageInner() {
     }
     setStep("processing");
     setError(null);
-    setNothingDetected(false);
     const coords = geo.coords ?? CHENNAI_FALLBACK;
     const capturedAt = new Date();
 
@@ -266,9 +271,6 @@ function ReportPageInner() {
           objectModel: detector.modelInfo.objectModel,
           anomalyModel: detector.modelInfo.anomalyModel,
         };
-        if (analysis.result.objectDetections.length === 0 && analysis.result.anomaly.score <= 0.6) {
-          setNothingDetected(true);
-        }
       } else {
         toast({
           title: "Live AI detection unavailable",
@@ -532,12 +534,6 @@ function ReportPageInner() {
             <CardContent className="flex flex-col gap-4">
               <p className="text-lg font-semibold text-foreground">{titleCase(incident.incidentType)}</p>
 
-              {nothingDetected && (
-                <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground">
-                  No vehicle, person, or road-relevant object was detected in this photo — evidence is marked accordingly rather than assumed.
-                </div>
-              )}
-
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <ReviewRow label="Location" value={incident.roadSegment?.name ?? incident.location?.address ?? "Location unavailable"} />
                 <ReviewRow label="Time" value={incident.observations[0] ? formatDateTime(incident.observations[0].observation.capturedAt) : "—"} />
@@ -554,7 +550,13 @@ function ReportPageInner() {
                   </div>
                 );
               })()}
-              <p className="text-xs text-muted-foreground">{whatHappened(incident.incidentType)}</p>
+
+              {(() => {
+                const captured = describeCaptured(incident.incidentType, incident.observations[0]?.observation ?? null);
+                return (
+                  <p className={cn("text-xs", captured.nothingRelevant ? "font-medium text-warning" : "text-muted-foreground")}>{captured.text}</p>
+                );
+              })()}
 
               <div className="flex flex-col gap-2 pt-2 sm:flex-row">
                 <Button onClick={handleSubmitToAuthority} disabled={submitBusy} className="flex-1">

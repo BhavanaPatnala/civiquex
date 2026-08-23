@@ -28,6 +28,75 @@ export function whatHappened(incidentType: string): string {
   return WHAT_HAPPENED[incidentType] ?? "A road safety issue was observed.";
 }
 
+const INCIDENT_TYPE_PLAIN: Record<string, string> = {
+  wrong_parking: "wrong parking",
+  footpath_obstruction: "a footpath obstruction",
+  bus_stop_obstruction: "a bus stop obstruction",
+  emergency_access_obstruction: "an emergency-access obstruction",
+  school_zone_obstruction: "a school-zone obstruction",
+  accessible_parking_obstruction: "an accessible-parking obstruction",
+  signage_obstruction: "signage damage",
+  dangerous_obstruction: "a dangerous obstruction",
+  hazardous_interaction: "a hazardous interaction",
+  pothole_damage: "pothole damage",
+};
+
+// Only a genuinely real detector's output is trustworthy enough to describe
+// what it did or didn't find — the demo vision stub (lib/ai/vision.ts) is a
+// deterministic stand-in with no relationship to actual image content, so
+// its output must never be presented as "what was captured."
+const REAL_OBJECT_MODEL_PREFIX = "coco-ssd";
+const ANOMALY_LABEL = "road_surface_anomaly";
+const ANOMALY_MEANINGFUL_THRESHOLD = 0.6;
+
+export interface CapturedDescription {
+  text: string;
+  /** True when a real detector ran and found nothing relevant — the UI should treat this as a strong "insufficient evidence" signal, not just quietly show the text. */
+  nothingRelevant: boolean;
+}
+
+/**
+ * Describes what the AI actually found in this specific recording — not a
+ * template keyed off the category the reporter picked. If real object
+ * detection ran and found nothing relevant to the reported incident type,
+ * this says so plainly instead of asserting the reported violation happened.
+ */
+export function describeCaptured(
+  incidentType: string,
+  observation: { visionModel: string; detections: { label: string; confidence: number }[] } | null
+): CapturedDescription {
+  if (!observation || !observation.visionModel.startsWith(REAL_OBJECT_MODEL_PREFIX)) {
+    // No real detector ran (demo-stub fallback, or no observation data at
+    // all) — fall back to the category description, since there's no real
+    // per-image signal to describe honestly either way.
+    return { text: whatHappened(incidentType), nothingRelevant: false };
+  }
+
+  const objectLabels = Array.from(
+    new Set(observation.detections.filter((d) => d.label !== ANOMALY_LABEL).map((d) => d.label.replace(/_/g, " ")))
+  );
+  const anomaly = observation.detections.find((d) => d.label === ANOMALY_LABEL);
+  const anomalyMeaningful = !!anomaly && anomaly.confidence >= ANOMALY_MEANINGFUL_THRESHOLD;
+
+  if (objectLabels.length === 0 && !anomalyMeaningful) {
+    const typePlain = INCIDENT_TYPE_PLAIN[incidentType] ?? "this incident type";
+    return {
+      text: `No vehicle, person, or road-relevant object was detected in this recording. This does not appear to show ${typePlain} — evidence is marked insufficient rather than assumed.`,
+      nothingRelevant: true,
+    };
+  }
+
+  const parts: string[] = [];
+  if (objectLabels.length > 0) {
+    const shown = objectLabels.slice(0, 3).join(", ");
+    parts.push(`${shown.charAt(0).toUpperCase()}${shown.slice(1)} detected in the recording`);
+  }
+  if (anomalyMeaningful) {
+    parts.push("a possible road-surface irregularity was also flagged (an unverified visual heuristic, not a confirmed pothole)");
+  }
+  return { text: `${parts.join("; ")}.`, nothingRelevant: false };
+}
+
 export interface VehicleInfo {
   typeClass: string | null;
   colorClass: string | null;

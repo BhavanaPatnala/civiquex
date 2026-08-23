@@ -56,6 +56,40 @@ function MediaPreview({ media }: { media: EvidenceObservation["observation"]["me
   return <img src={media.url} alt="Evidence" className="h-40 w-full rounded-md object-cover" />;
 }
 
+// The anomaly heuristic (see lib/client/roadAnomaly.ts) is a raw edge-
+// gradient statistic, not a trained classifier — it can fire on any sharp
+// contrast (a wall corner, a shadow), not just a pothole. Showing it as a
+// plain "road surface anomaly" badge next to real object labels implies more
+// confidence than it has, so it only appears when the score clears a real
+// threshold, and even then it's labeled as a heuristic, not a finding.
+const ANOMALY_LABEL = "road_surface_anomaly";
+const ANOMALY_MEANINGFUL_THRESHOLD = 0.6;
+
+function DetectionBadges({ detections }: { detections: { label: string; confidence: number }[] }) {
+  const objects = detections.filter((d) => d.label !== ANOMALY_LABEL);
+  const anomaly = detections.find((d) => d.label === ANOMALY_LABEL);
+  const anomalyMeaningful = !!anomaly && anomaly.confidence >= ANOMALY_MEANINGFUL_THRESHOLD;
+
+  if (objects.length === 0 && !anomalyMeaningful) {
+    return <p className="text-[11px] text-muted-foreground">No vehicle, person, or road-relevant object was detected in this recording.</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {objects.map((d, i) => (
+        <Badge key={i} variant="outline" className="text-[10px]">
+          {d.label.replace(/_/g, " ")}
+        </Badge>
+      ))}
+      {anomalyMeaningful && (
+        <Badge variant="outline" className="text-[10px]" title="An unverified visual heuristic, not a confirmed pothole">
+          possible road-surface irregularity
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 export function EvidenceTimeline({ items }: { items: EvidenceObservation[] }) {
   const [expanded, setExpanded] = useState<string | null>(items[0]?.linkId ?? null);
 
@@ -92,13 +126,7 @@ export function EvidenceTimeline({ items }: { items: EvidenceObservation[] }) {
             {isOpen && (
               <div className="flex flex-col gap-3 border-t border-border p-3">
                 <MediaPreview media={item.observation.media} />
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {item.observation.detections.map((d, i) => (
-                    <Badge key={i} variant="outline" className="text-[10px]">
-                      {d.label.replace(/_/g, " ")}
-                    </Badge>
-                  ))}
-                </div>
+                <DetectionBadges detections={item.observation.detections} />
                 {item.observation.media && (
                   <p className="text-[11px] text-muted-foreground">
                     Unrelated faces and plates in this recording are automatically blurred before it is shown outside the reviewing authority.

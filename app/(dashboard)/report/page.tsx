@@ -365,7 +365,7 @@ function ReportPageInner() {
         mediaBase64: prepared.mediaBase64,
         mediaBlobUrl: prepared.mediaBlobUrl,
         mediaContentHash: prepared.mediaContentHash,
-        mediaType: mimeType,
+        mediaType: prepared.mediaType,
         incidentTypeGuess: activeIncidentType,
         lat: coords.lat,
         lng: coords.lng,

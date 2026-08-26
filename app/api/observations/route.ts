@@ -6,10 +6,10 @@ import { ok, fail, withApiHandler } from "@/lib/api/respond";
 import { createObservation } from "@/lib/services/observationPipeline";
 import { recordDirectUpload, saveBase64Media } from "@/lib/api/media";
 import { INCIDENT_TYPES } from "@/lib/types";
+import { ALLOWED_MEDIA_TYPES } from "@/lib/mediaTypes";
 import type { Detection, VisionResult } from "@/lib/ai/vision";
 
 const MAX_FILE_BYTES = 60 * 1024 * 1024; // 60MB
-const ALLOWED_TYPES = ["video/webm", "video/mp4", "image/jpeg", "image/png", "image/webp"];
 
 const detectionSummarySchema = z.object({
   objectDetections: z.array(
@@ -38,7 +38,7 @@ const bodySchema = z.object({
     .string()
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
-  mediaType: z.enum(ALLOWED_TYPES as [string, ...string[]]),
+  mediaType: z.enum(ALLOWED_MEDIA_TYPES),
   // Real, client-side TensorFlow.js (COCO-SSD) + Sobel road-anomaly detection,
   // run on the actual captured frame — see useRoadPatrolDetector. When
   // present, this replaces the deterministic demo vision stub so the AI

@@ -6,16 +6,9 @@ import { get } from "@vercel/blob";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { fail, withApiHandler } from "@/lib/api/respond";
+import { MIME_BY_EXT } from "@/lib/mediaTypes";
 
 const UPLOAD_DIR = path.join(process.cwd(), "storage", "uploads");
-
-const CONTENT_TYPES: Record<string, string> = {
-  webm: "video/webm",
-  mp4: "video/mp4",
-  jpg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-};
 
 // Evidence access is gated behind a session and every fetch is logged —
 // evidence is kept separate from public content per the privacy-first
@@ -67,7 +60,7 @@ export const GET = withApiHandler(async (req: Request, { params }: { params: { f
   const ext = filename.split(".").pop() ?? "";
   return new NextResponse(new Uint8Array(data), {
     headers: {
-      "Content-Type": CONTENT_TYPES[ext] ?? "application/octet-stream",
+      "Content-Type": MIME_BY_EXT[ext] ?? "application/octet-stream",
       "Cache-Control": "private, max-age=3600",
     },
   });

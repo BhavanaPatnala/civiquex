@@ -4,14 +4,7 @@ import { upload, uploadPart } from "@vercel/blob/client";
 import { apiDelete, apiPatch, apiPost, blobToBase64 } from "@/lib/client/api";
 import { deletePendingBlob, getPendingBlob, putPendingBlob } from "@/lib/client/uploadStore";
 import { partByteRange, remainingPartNumbers, totalPartsFor, type CompletedPart } from "@/lib/uploadParts";
-
-const EXT_BY_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "video/webm": "webm",
-  "video/mp4": "mp4",
-};
+import { EXT_BY_MIME, normalizeMimeType } from "@/lib/mediaTypes";
 
 // Anything under this rides the simple single-shot direct-upload path
 // (unchanged). Above it, resumability actually matters — a dropped
@@ -51,6 +44,8 @@ async function isBlobConfigured(): Promise<boolean> {
 
 export interface PreparedMedia {
   mediaContentHash: string;
+  /** The normalized MIME type actually used for the upload — use this, not the original blob.type, in any follow-up request (e.g. /api/observations' mediaType field) so they can never disagree. */
+  mediaType: string;
   /** Set when uploaded directly to Blob from the browser. */
   mediaBlobUrl?: string;
   /** Set when Blob isn't configured (local dev) — the existing small-payload path. */
@@ -228,14 +223,19 @@ async function uploadLargeMedia(blob: Blob, mimeType: string, contentHash: strin
  * the base64-JSON path only when Blob genuinely isn't configured (local dev
  * has no such request-size ceiling).
  */
-export async function prepareMediaForUpload(blob: Blob, mimeType: string, opts?: UploadOptions): Promise<PreparedMedia> {
+export async function prepareMediaForUpload(blob: Blob, rawMimeType: string, opts?: UploadOptions): Promise<PreparedMedia> {
+  // A recorded/selected file's reported type can carry codec parameters
+  // (e.g. "video/webm;codecs=vp9,opus") that would otherwise fail an exact
+  // match against the server's allowlist — normalize once, here, and use
+  // this value everywhere downstream (including what's sent to the server).
+  const mimeType = normalizeMimeType(rawMimeType);
   const mediaContentHash = await sha256Hex(blob);
   opts?.onHashReady?.(mediaContentHash);
 
   if (await isBlobConfigured()) {
     if (blob.size > LARGE_FILE_THRESHOLD_BYTES) {
       const mediaBlobUrl = await uploadLargeMedia(blob, mimeType, mediaContentHash, opts);
-      return { mediaContentHash, mediaBlobUrl };
+      return { mediaContentHash, mediaType: mimeType, mediaBlobUrl };
     }
 
     const ext = EXT_BY_MIME[mimeType] ?? "bin";
@@ -246,10 +246,10 @@ export async function prepareMediaForUpload(blob: Blob, mimeType: string, opts?:
       abortSignal: opts?.signal,
     });
     opts?.onProgress?.(1);
-    return { mediaContentHash, mediaBlobUrl: result.url };
+    return { mediaContentHash, mediaType: mimeType, mediaBlobUrl: result.url };
   }
 
   const mediaBase64 = await blobToBase64(blob);
   opts?.onProgress?.(1);
-  return { mediaContentHash, mediaBase64 };
+  return { mediaContentHash, mediaType: mimeType, mediaBase64 };
 }

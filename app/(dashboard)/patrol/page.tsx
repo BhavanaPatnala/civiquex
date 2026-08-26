@@ -286,7 +286,7 @@ export default function PatrolPage() {
         mediaBase64: prepared.mediaBase64,
         mediaBlobUrl: prepared.mediaBlobUrl,
         mediaContentHash: prepared.mediaContentHash,
-        mediaType: mediaBlob.type || "image/jpeg",
+        mediaType: prepared.mediaType,
         lat: effectiveCoords.lat,
         lng: effectiveCoords.lng,
         gpsAccuracyMeters: coords?.accuracy,

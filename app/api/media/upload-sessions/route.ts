@@ -4,6 +4,7 @@ import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client";
 import { requireSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ok, fail, withApiHandler } from "@/lib/api/respond";
+import { ALLOWED_MEDIA_TYPES, EXT_BY_MIME } from "@/lib/mediaTypes";
 
 // Large-media resumable upload — the browser splits a file into parts and
 // uploads them directly to Vercel Blob (bytes never pass through our own API
@@ -18,19 +19,11 @@ import { ok, fail, withApiHandler } from "@/lib/api/respond";
 
 const PART_SIZE_BYTES = 8 * 1024 * 1024; // 8MB — Blob requires >=5MB per part except the last
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2GB — generous ceiling for a real dashcam-length clip
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "video/webm", "video/mp4"];
-const EXT_BY_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "video/webm": "webm",
-  "video/mp4": "mp4",
-};
 const CLIENT_TOKEN_TTL_MS = 6 * 60 * 60 * 1000; // 6h — generous enough to survive a paused/resumed large upload
 
 const bodySchema = z.object({
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
-  mimeType: z.enum(ALLOWED_TYPES as [string, ...string[]]),
+  mimeType: z.enum(ALLOWED_MEDIA_TYPES),
   totalBytes: z.coerce.number().int().positive().max(MAX_UPLOAD_BYTES),
 });
 

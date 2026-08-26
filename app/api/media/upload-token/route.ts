@@ -2,6 +2,7 @@ import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { fail, ok, withApiHandler } from "@/lib/api/respond";
+import { ALLOWED_MEDIA_TYPES } from "@/lib/mediaTypes";
 
 // Cheap capability probe the client checks once before deciding whether to
 // upload directly to Blob or fall back to the base64-JSON path (local dev,
@@ -9,7 +10,6 @@ import { fail, ok, withApiHandler } from "@/lib/api/respond";
 export const GET = withApiHandler(async () => ok({ configured: !!process.env.BLOB_READ_WRITE_TOKEN }));
 
 const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200MB — generous for a short evidence video
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "video/webm", "video/mp4"];
 
 // Authorizes a direct browser-to-Blob upload for large evidence media (video
 // in particular routinely exceeds Vercel's ~4.5MB request-body limit for
@@ -33,7 +33,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ALLOWED_TYPES,
+        allowedContentTypes: ALLOWED_MEDIA_TYPES,
         addRandomSuffix: false,
         allowOverwrite: true, // filenames are content hashes — re-uploading identical bytes is a legitimate no-op
         maximumSizeInBytes: MAX_UPLOAD_BYTES,

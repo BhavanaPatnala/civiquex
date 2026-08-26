@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { head, put } from "@vercel/blob";
+import { EXT_BY_MIME, normalizeMimeType } from "@/lib/mediaTypes";
 
 // Route Handlers here accept media as base64-encoded JSON rather than
 // multipart/form-data. Next.js 14.2's Route Handler `request.formData()`
@@ -21,13 +22,6 @@ import { head, put } from "@vercel/blob";
 // logged proxy every piece of evidence is served through.
 
 const UPLOAD_DIR = path.join(process.cwd(), "storage", "uploads");
-const EXT_BY_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "video/webm": "webm",
-  "video/mp4": "mp4",
-};
 
 export interface SavedMedia {
   hash: string;
@@ -39,7 +33,8 @@ export interface SavedMedia {
 }
 
 /** Decodes a base64 data payload, writes it to the upload store (Vercel Blob or local disk), and returns its reference. Throws on an unsupported MIME type. */
-export async function saveBase64Media(base64: string, mimeType: string, maxBytes: number): Promise<SavedMedia> {
+export async function saveBase64Media(base64: string, rawMimeType: string, maxBytes: number): Promise<SavedMedia> {
+  const mimeType = normalizeMimeType(rawMimeType);
   const ext = EXT_BY_MIME[mimeType];
   if (!ext) throw new Error(`Unsupported media type: ${mimeType}`);
 
@@ -107,7 +102,8 @@ export async function recordDirectUpload(blobUrl: string, expectedHash: string):
   }
 
   const meta = await head(blobUrl);
-  const ext = EXT_BY_MIME[meta.contentType];
+  const contentType = normalizeMimeType(meta.contentType);
+  const ext = EXT_BY_MIME[contentType];
   if (!ext) throw new Error(`Unsupported media type: ${meta.contentType}`);
 
   const filename = `${expectedHash}.${ext}`;
@@ -120,7 +116,7 @@ export async function recordDirectUpload(blobUrl: string, expectedHash: string):
     filename,
     storageRef: `/api/media/${filename}`,
     blobUrl: meta.url,
-    kind: meta.contentType.startsWith("video") ? "video" : "image",
+    kind: contentType.startsWith("video") ? "video" : "image",
     bytes: meta.size,
   };
 }

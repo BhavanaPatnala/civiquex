@@ -34,18 +34,22 @@ const RISK_COLOR: Record<string, string> = {
   CRITICAL: "#dc2626",
 };
 
-// tile.openstreetmap.org's own usage policy does not permit direct embedding
-// in third-party apps at any real scale, and — the concrete symptom we hit —
-// it doesn't send the CORS headers WebGL needs to use a tile as a texture,
-// so tiles fetch but silently fail to decode. CARTO's free basemaps are
-// built for exactly this kind of embedding and send proper CORS headers;
-// "dark_all" also matches this app's actual theme instead of a plain light
-// raster on a dark page. Hardcoded, not env-configurable: a stale
-// NEXT_PUBLIC_MAP_TILE_URL left over from before this fix (baked into a
-// prior Vercel build) would otherwise silently keep overriding this and
-// resurrecting the exact bug this fixes.
-const TILE_URL = "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png";
-const ATTRIBUTION = "© OpenStreetMap contributors © CARTO";
+// Third try at a tile provider, each time root-caused rather than guessed:
+//   1. tile.openstreetmap.org doesn't send CORS headers WebGL needs to use a
+//      tile as a texture (tiles fetch, decode silently fails), and its
+//      usage policy doesn't permit this kind of embedding anyway.
+//   2. CARTO's basemaps.cartocdn.com now requires a signed-up API key for
+//      any access at all (confirmed live: unauthenticated requests return a
+//      watermarked "API KEY REQUIRED" tile, not an error — it "works" well
+//      enough to hide the problem until you look closely) — a policy change
+//      after this was first wired up, not something we did wrong.
+// Esri's basemap tile service is confirmed (curl, live) to send
+// `Access-Control-Allow-Origin: *`, needs no key or signup, and is free for
+// this kind of embedding under Esri's own basemap terms. Its tile path order
+// is {z}/{y}/{x} — row before column — unlike every other provider here, so
+// don't "simplify" this back to {z}/{x}/{y} without re-checking.
+const TILE_URL = "https://server.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+const ATTRIBUTION = "© Esri, HERE, Garmin, OpenStreetMap contributors";
 
 const STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -53,15 +57,15 @@ const STYLE: maplibregl.StyleSpecification = {
   // (the cluster-count labels below). No API key needed.
   glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   sources: {
-    osm: {
+    basemap: {
       type: "raster",
       tiles: [TILE_URL],
       tileSize: 256,
       attribution: ATTRIBUTION,
-      maxzoom: 19,
+      maxzoom: 16, // Esri's World_Dark_Gray_Base tops out here in most regions; MapLibre upscales beyond it
     },
   },
-  layers: [{ id: "osm", type: "raster", source: "osm" }],
+  layers: [{ id: "basemap", type: "raster", source: "basemap" }],
 };
 
 const CHENNAI_CENTER: [number, number] = [80.245, 13.02];

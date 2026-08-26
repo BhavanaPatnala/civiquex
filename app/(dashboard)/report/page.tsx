@@ -470,8 +470,8 @@ function ReportPageInner() {
                 </p>
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={resumeUpload}>
-                  Resume upload
+                <Button size="sm" onClick={resumeUpload} disabled={sessionLoading}>
+                  {sessionLoading ? "Checking sign-in…" : "Resume upload"}
                 </Button>
                 <Button size="sm" variant="outline" onClick={discardResumable}>
                   Discard
@@ -645,8 +645,8 @@ function ReportPageInner() {
                     >
                       <RotateCcw className="h-4 w-4" /> Retake
                     </Button>
-                    <Button onClick={() => processEvidence()} className="flex-1">
-                      Process evidence
+                    <Button onClick={() => processEvidence()} disabled={sessionLoading} className="flex-1">
+                      {sessionLoading ? "Checking sign-in…" : "Process evidence"}
                     </Button>
                   </div>
                 </div>

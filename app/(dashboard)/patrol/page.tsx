@@ -24,7 +24,7 @@ import { ShutterButton } from "@/components/domain/shutter-button";
 import { useSession } from "@/lib/client/useSession";
 import { useRoadPatrolDetector, type PatrolFrameResult } from "@/lib/client/useRoadPatrolDetector";
 import { apiPost, apiGet, ApiError } from "@/lib/client/api";
-import { prepareMediaForUpload } from "@/lib/client/uploadMedia";
+import { MediaProcessingError, prepareMediaForUpload } from "@/lib/client/uploadMedia";
 import { useToast } from "@/components/ui/toast-provider";
 import { cn, formatPercent } from "@/lib/utils";
 
@@ -306,7 +306,11 @@ export default function PatrolPage() {
       setSessionCandidates((prev) => [res, ...prev]);
       toast({ title: "Candidate captured", description: res.roadName ? `Matched to ${res.roadName}` : "Location matched via GPS", variant: "success" });
     } catch (err) {
-      toast({ title: "Capture failed", description: err instanceof ApiError ? err.message : undefined, variant: "destructive" });
+      toast({
+        title: "Capture failed",
+        description: err instanceof ApiError || err instanceof MediaProcessingError ? err.message : undefined,
+        variant: "destructive",
+      });
     } finally {
       setCapturing(false);
     }

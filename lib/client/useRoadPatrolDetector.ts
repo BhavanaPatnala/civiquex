@@ -88,28 +88,39 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
       const model = modelRef.current;
       if (!model) return null;
 
-      const start = performance.now();
-      const predictions = await model.detect(canvas);
-      const inferenceMs = performance.now() - start;
+      // Real inference on arbitrary real-world input (unusual dimensions, a
+      // lost WebGL context, a transient OOM under memory pressure) can throw
+      // from inside TensorFlow.js/COCO-SSD itself — unlike the decode step
+      // in analyzeImageBlob, this had no boundary, so a single bad frame
+      // could crash the entire submission instead of honestly reporting "no
+      // detection result" the same way every other failure mode here does.
+      try {
+        const start = performance.now();
+        const predictions = await model.detect(canvas);
+        const inferenceMs = performance.now() - start;
 
-      const objectDetections: DetectedObject[] = predictions.map(
-        (p): DetectedObject => ({
-          label: p.class,
-          confidence: p.score,
-          bbox: [p.bbox[0] / canvas.width, p.bbox[1] / canvas.height, p.bbox[2] / canvas.width, p.bbox[3] / canvas.height],
-        })
-      );
+        const objectDetections: DetectedObject[] = predictions.map(
+          (p): DetectedObject => ({
+            label: p.class,
+            confidence: p.score,
+            bbox: [p.bbox[0] / canvas.width, p.bbox[1] / canvas.height, p.bbox[2] / canvas.width, p.bbox[3] / canvas.height],
+          })
+        );
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const anomaly = detectRoadAnomaly(imageData);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const anomaly = detectRoadAnomaly(imageData);
 
-      const result: PatrolFrameResult = { at: Date.now(), objectDetections, anomaly, inferenceMs };
-      totalInferenceMsRef.current += inferenceMs;
-      framesAnalyzedRef.current += 1;
-      setLastResult(result);
-      setFramesAnalyzed(framesAnalyzedRef.current);
-      setAvgInferenceMs(totalInferenceMsRef.current / framesAnalyzedRef.current);
-      return result;
+        const result: PatrolFrameResult = { at: Date.now(), objectDetections, anomaly, inferenceMs };
+        totalInferenceMsRef.current += inferenceMs;
+        framesAnalyzedRef.current += 1;
+        setLastResult(result);
+        setFramesAnalyzed(framesAnalyzedRef.current);
+        setAvgInferenceMs(totalInferenceMsRef.current / framesAnalyzedRef.current);
+        return result;
+      } catch (err) {
+        console.error("[patrol] frame analysis failed", err);
+        return null;
+      }
     },
     []
   );
@@ -168,7 +179,11 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
    * the UI can show an accurate message instead of hanging silently.
    */
   const analyzeImageBlob = useCallback(
-    async (file: Blob): Promise<{ ok: true; result: PatrolFrameResult } | { ok: false; reason: "model-not-ready" | "decode-failed" | "canvas-unavailable" }> => {
+    async (
+      file: Blob
+    ): Promise<
+      { ok: true; result: PatrolFrameResult } | { ok: false; reason: "model-not-ready" | "decode-failed" | "canvas-unavailable" | "detection-failed" }
+    > => {
       loadModel(); // no-op if already loading/loaded — safety net for a caller that skipped the deferred-load trigger
       for (let attempt = 0; attempt < 100 && !modelRef.current; attempt++) {
         await new Promise((r) => setTimeout(r, 100));
@@ -194,7 +209,7 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
       bitmap.close();
 
       const result = await analyzeCanvas(canvas, ctx);
-      return result ? { ok: true, result } : { ok: false, reason: "model-not-ready" };
+      return result ? { ok: true, result } : { ok: false, reason: "detection-failed" };
     },
     [analyzeCanvas, loadModel]
   );

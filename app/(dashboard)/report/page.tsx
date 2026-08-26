@@ -21,7 +21,14 @@ import { useGeolocation } from "@/lib/client/useGeolocation";
 import { useSession } from "@/lib/client/useSession";
 import { useRoadPatrolDetector } from "@/lib/client/useRoadPatrolDetector";
 import { apiGet, apiPost, ApiError } from "@/lib/client/api";
-import { cancelUploadSession, checkForResumableUpload, prepareMediaForUpload, UploadCancelledError, type ResumableUpload } from "@/lib/client/uploadMedia";
+import {
+  cancelUploadSession,
+  checkForResumableUpload,
+  MediaProcessingError,
+  prepareMediaForUpload,
+  UploadCancelledError,
+  type ResumableUpload,
+} from "@/lib/client/uploadMedia";
 import { getPendingBlob } from "@/lib/client/uploadStore";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast-provider";
@@ -387,7 +394,7 @@ function ReportPageInner() {
         setStep("capture");
         return;
       }
-      setError(err instanceof ApiError ? err.message : "Processing failed — please try again.");
+      setError(err instanceof ApiError || err instanceof MediaProcessingError ? err.message : "Processing failed — please try again.");
       setStep("capture");
     }
   }

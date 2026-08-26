@@ -19,7 +19,25 @@ export class UploadCancelledError extends Error {
   }
 }
 
+/** A safe, user-facing message for a known failure mode — unlike an arbitrary caught exception, callers should show `.message` directly rather than a generic fallback. */
+export class MediaProcessingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MediaProcessingError";
+  }
+}
+
 async function sha256Hex(blob: Blob): Promise<string> {
+  // crypto.subtle only exists in a secure context (HTTPS, or localhost) —
+  // a plain-HTTP LAN address (e.g. testing on a phone against a dev
+  // machine's local IP) silently has no crypto.subtle at all on real mobile
+  // browsers, which previously threw an opaque TypeError here that surfaced
+  // to the user as a generic "Processing failed" with no way to self-diagnose.
+  if (!crypto.subtle) {
+    throw new MediaProcessingError(
+      "This connection isn't secure enough to process evidence (HTTPS is required). Open the site's regular link instead of a local network address."
+    );
+  }
   const buf = await blob.arrayBuffer();
   const digest = await crypto.subtle.digest("SHA-256", buf);
   return Array.from(new Uint8Array(digest))

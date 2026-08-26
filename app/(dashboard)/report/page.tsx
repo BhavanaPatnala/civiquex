@@ -21,7 +21,9 @@ import { useGeolocation } from "@/lib/client/useGeolocation";
 import { useSession } from "@/lib/client/useSession";
 import { useRoadPatrolDetector } from "@/lib/client/useRoadPatrolDetector";
 import { apiGet, apiPost, ApiError } from "@/lib/client/api";
-import { prepareMediaForUpload } from "@/lib/client/uploadMedia";
+import { cancelUploadSession, checkForResumableUpload, prepareMediaForUpload, UploadCancelledError, type ResumableUpload } from "@/lib/client/uploadMedia";
+import { getPendingBlob } from "@/lib/client/uploadStore";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast-provider";
 import { INCIDENT_TYPES } from "@/lib/types";
 import { cn, titleCase, formatDateTime } from "@/lib/utils";
@@ -94,6 +96,36 @@ interface IncidentResult {
 const CHENNAI_FALLBACK = { lat: 13.045, lng: 80.24 };
 const MAX_RECORD_SECONDS = 10;
 
+// A resumable upload only saves the raw bytes (see lib/client/uploadStore.ts)
+// — resuming the actual submission also needs the category/location/time
+// that upload belonged to, which is ordinary React state and doesn't
+// survive a reload on its own. This is that context, keyed to the same
+// content hash so it's only ever offered back for the matching upload.
+const DRAFT_KEY = "civiquex-report-draft";
+interface ReportDraft {
+  contentHash: string;
+  mimeType: string;
+  incidentType: string;
+  capturedAt: string;
+  lat: number;
+  lng: number;
+  gpsAccuracyMeters?: number;
+}
+function saveDraft(draft: ReportDraft) {
+  window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+}
+function readDraft(): ReportDraft | null {
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY);
+    return raw ? (JSON.parse(raw) as ReportDraft) : null;
+  } catch {
+    return null;
+  }
+}
+function clearDraft() {
+  window.localStorage.removeItem(DRAFT_KEY);
+}
+
 export default function ReportPage() {
   return (
     <Suspense fallback={null}>
@@ -124,6 +156,10 @@ function ReportPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [processingLabel, setProcessingLabel] = useState("Running AI detection on your evidence…");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [resumable, setResumable] = useState<ResumableUpload | null>(null);
+  const uploadSessionRef = useRef<{ sessionId: string; contentHash: string } | null>(null);
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Deferred: loading TensorFlow.js is heavy enough to visibly compete with
@@ -148,6 +184,17 @@ function ReportPageInner() {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // An interrupted large upload leaves its bytes in IndexedDB and an
+  // IN_PROGRESS session on the server — offer to pick it back up instead of
+  // silently discarding real, already-uploaded progress.
+  useEffect(() => {
+    checkForResumableUpload().then((found) => {
+      if (!found) return;
+      const draft = readDraft();
+      if (draft?.contentHash === found.contentHash) setResumable(found);
+    });
   }, []);
 
   async function startCamera() {
@@ -242,16 +289,25 @@ function ReportPageInner() {
     setPreviewUrl(URL.createObjectURL(file));
   }
 
-  async function processEvidence() {
-    if (!incidentType || !blob) return;
+  async function processEvidence(overrides?: { capturedAt: Date; lat: number; lng: number; gpsAccuracyMeters?: number; blob: Blob; incidentType: string }) {
+    // React state updates are async — a caller that just called setBlob()/
+    // setIncidentType() in the same tick (see resumeUpload()) cannot rely on
+    // the `blob`/`incidentType` closure below reflecting them yet, so an
+    // override always wins over component state rather than falling back to
+    // a stale read of it.
+    const activeBlob = overrides?.blob ?? blob;
+    const activeIncidentType = overrides?.incidentType ?? incidentType;
+    if (!activeIncidentType || !activeBlob) return;
     if (!user) {
       setError("Sign in to submit an observation.");
       return;
     }
     setStep("processing");
     setError(null);
-    const coords = geo.coords ?? CHENNAI_FALLBACK;
-    const capturedAt = new Date();
+    setUploadProgress(null);
+    const coords = overrides ? { lat: overrides.lat, lng: overrides.lng } : geo.coords ?? CHENNAI_FALLBACK;
+    const capturedAt = overrides?.capturedAt ?? new Date();
+    const gpsAccuracyMeters = overrides?.gpsAccuracyMeters ?? geo.coords?.accuracy;
 
     try {
       // Real detection first: run the actual TensorFlow.js model (COCO-SSD)
@@ -259,8 +315,8 @@ function ReportPageInner() {
       // same real pipeline AI Road Patrol uses — so the result reflects what
       // is genuinely in the photo/video, not just the category picked above.
       setProcessingLabel("Running AI detection on your evidence…");
-      const isVideo = blob.type.startsWith("video");
-      const frameForDetection = isVideo ? await extractVideoFrameBlob(blob) : blob;
+      const isVideo = activeBlob.type.startsWith("video");
+      const frameForDetection = isVideo ? await extractVideoFrameBlob(activeBlob) : activeBlob;
       const analysis = frameForDetection ? await detector.analyzeImageBlob(frameForDetection) : ({ ok: false, reason: "decode-failed" } as const);
 
       let detectionSummary:
@@ -290,18 +346,31 @@ function ReportPageInner() {
       }
 
       setProcessingLabel(isVideo ? "Uploading video evidence…" : "Correlating, checking applicable rules, and computing evidence…");
-      const prepared = await prepareMediaForUpload(blob, blob.type || "image/jpeg");
+      const mimeType = activeBlob.type || "image/jpeg";
+
+      uploadAbortRef.current = new AbortController();
+      const prepared = await prepareMediaForUpload(activeBlob, mimeType, {
+        onHashReady: (contentHash) =>
+          saveDraft({ contentHash, mimeType, incidentType: activeIncidentType, capturedAt: capturedAt.toISOString(), lat: coords.lat, lng: coords.lng, gpsAccuracyMeters }),
+        onProgress: (fraction) => setUploadProgress(fraction),
+        onSessionReady: (s) => (uploadSessionRef.current = s),
+        signal: uploadAbortRef.current.signal,
+      });
+      uploadSessionRef.current = null;
+      setUploadProgress(null);
+      clearDraft();
+
       setProcessingLabel("Correlating, checking applicable rules, and computing evidence…");
       const res = await apiPost<{ observationId: string; incidentId: string; isNewIncident: boolean }>("/api/observations", {
         mediaBase64: prepared.mediaBase64,
         mediaBlobUrl: prepared.mediaBlobUrl,
         mediaContentHash: prepared.mediaContentHash,
-        mediaType: blob.type || "image/jpeg",
-        incidentTypeGuess: incidentType,
+        mediaType: mimeType,
+        incidentTypeGuess: activeIncidentType,
         lat: coords.lat,
         lng: coords.lng,
         capturedAt: capturedAt.toISOString(),
-        gpsAccuracyMeters: geo.coords?.accuracy,
+        gpsAccuracyMeters,
         detectionSummary,
       });
       setResult(res);
@@ -309,9 +378,55 @@ function ReportPageInner() {
       setIncident(detail);
       setStep("review");
     } catch (err) {
+      setUploadProgress(null);
+      // An aborted upload can surface either our own UploadCancelledError
+      // (checked between parts) or the Blob SDK's own AbortError (an
+      // in-flight uploadPart request cut short) — either way, if this was a
+      // deliberate Cancel, it's not a failure worth alarming the user about.
+      if (err instanceof UploadCancelledError || uploadAbortRef.current?.signal.aborted) {
+        setStep("capture");
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "Processing failed — please try again.");
       setStep("capture");
     }
+  }
+
+  async function cancelUpload() {
+    uploadAbortRef.current?.abort();
+    if (uploadSessionRef.current) {
+      await cancelUploadSession(uploadSessionRef.current.sessionId, uploadSessionRef.current.contentHash);
+      uploadSessionRef.current = null;
+    }
+    clearDraft();
+  }
+
+  async function resumeUpload() {
+    if (!resumable) return;
+    const draft = readDraft();
+    const pendingBlob = await getPendingBlob(resumable.contentHash);
+    if (!draft || !pendingBlob) {
+      setResumable(null);
+      clearDraft();
+      return;
+    }
+    setIncidentType(draft.incidentType);
+    setBlob(pendingBlob);
+    setResumable(null);
+    await processEvidence({
+      capturedAt: new Date(draft.capturedAt),
+      lat: draft.lat,
+      lng: draft.lng,
+      gpsAccuracyMeters: draft.gpsAccuracyMeters,
+      blob: pendingBlob,
+      incidentType: draft.incidentType,
+    });
+  }
+
+  async function discardResumable() {
+    if (resumable) await cancelUploadSession(resumable.sessionId, resumable.contentHash);
+    clearDraft();
+    setResumable(null);
   }
 
   async function handleSubmitToAuthority() {
@@ -345,6 +460,27 @@ function ReportPageInner() {
     <>
       <PageHeader title="Report Safety Issue" description="Observe → capture evidence → let the AI pipeline process it" />
       <PageContainer className="mx-auto flex max-w-2xl flex-col gap-5">
+        {resumable && step === "type" && (
+          <Card className="border-primary/40 bg-primary/5">
+            <CardContent className="flex flex-col gap-3 py-4">
+              <div>
+                <p className="text-sm font-medium">Resume interrupted upload</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  An evidence upload didn&apos;t finish last time — {Math.round(resumable.fractionComplete * 100)}% already made it through. Pick up where it left off instead of recapturing.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={resumeUpload}>
+                  Resume upload
+                </Button>
+                <Button size="sm" variant="outline" onClick={discardResumable}>
+                  Discard
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {step === "type" && (
           <Card>
             <CardHeader>
@@ -509,7 +645,7 @@ function ReportPageInner() {
                     >
                       <RotateCcw className="h-4 w-4" /> Retake
                     </Button>
-                    <Button onClick={processEvidence} className="flex-1">
+                    <Button onClick={() => processEvidence()} className="flex-1">
                       Process evidence
                     </Button>
                   </div>
@@ -526,9 +662,21 @@ function ReportPageInner() {
             <CardContent className="flex flex-col items-center gap-3 py-16">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
               <p className="text-sm font-medium">{processingLabel}</p>
-              <p className="max-w-sm text-center text-xs text-muted-foreground">
-                Real object detection runs on your device — nothing is assumed from the category you picked.
-              </p>
+              {uploadProgress !== null ? (
+                <div className="w-full max-w-xs">
+                  <Progress value={Math.round(uploadProgress * 100)} />
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>{Math.round(uploadProgress * 100)}%</span>
+                    <button type="button" onClick={cancelUpload} className="font-medium text-destructive hover:underline">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="max-w-sm text-center text-xs text-muted-foreground">
+                  Real object detection runs on your device — nothing is assumed from the category you picked.
+                </p>
+              )}
             </CardContent>
           </Card>
         )}

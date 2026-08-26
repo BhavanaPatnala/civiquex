@@ -36,6 +36,7 @@ model User {
   notifications     Notification[]
   auditLogs         AuditLog[]
   patrolDetections  PatrolDetection[]
+  uploadSessions    UploadSession[]
   authority         Authority?        @relation(fields: [authorityId], references: [id])
 
   @@index([authorityId])
@@ -250,6 +251,36 @@ model EvidenceAccessLog {
   evidence Evidence @relation(fields: [evidenceId], references: [id])
 
   @@index([evidenceId])
+}
+
+// A resumable multipart upload in progress (or finished/cancelled). Large
+// captures (video especially) upload directly from the browser to Vercel
+// Blob in parts, so a dropped connection or closed tab only loses the
+// current part, not the whole file — see lib/client/uploadMedia.ts's
+// uploadLargeMedia(). Deliberately NOT the same record as Evidence: this is
+// staging/transport state ("did the bytes arrive"), Evidence is the
+// permanent record of what was captured. A session graduates into an
+// Evidence row (via the existing recordDirectUpload()) only once complete.
+model UploadSession {
+  id                 String   @id @default(cuid())
+  userId             String
+  contentHash        String // sha256 hex, computed client-side before any bytes are sent
+  mimeType           String
+  totalBytes         BigInt // not Int — a 32-bit Int caps at ~2.1GB, too close to real video sizes
+  blobPathname       String // "uploads/<hash>.<ext>" — same convention saveBase64Media/recordDirectUpload already use
+  multipartUploadId  String
+  multipartKey       String
+  partSizeBytes      Int // fixed per session; must be reproduced identically to resume correctly
+  completedPartsJson String   @default("[]") // [{partNumber, etag, sizeBytes}] — small, bounded (~125-250 parts for a 1-2GB file), so JSON over a child table
+  status             String   @default("IN_PROGRESS") // "IN_PROGRESS" | "COMPLETE" | "CANCELLED" | "FAILED"
+  blobUrl            String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, contentHash])
+  @@index([status])
 }
 
 // ---------------------------------------------------------------------------

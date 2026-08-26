@@ -43,6 +43,7 @@ async function main() {
   console.log("Seeding CiviqueX demo dataset...");
 
   await prisma.notification.deleteMany();
+  await prisma.uploadSession.deleteMany();
   await prisma.patrolDetection.deleteMany();
   await prisma.contract.deleteMany();
   await prisma.auditLog.deleteMany();

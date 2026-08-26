@@ -3,7 +3,7 @@ import { resolveAuthority, type AuthorityCandidate, type RoutingFeedbackRecord }
 import type { LatLng } from "@/lib/geo";
 
 async function loadCandidates(): Promise<AuthorityCandidate[]> {
-  const authorities = await prisma.authority.findMany({ include: { boundaries: true } });
+  const authorities = await prisma.authority.findMany({ relationLoadStrategy: "join", include: { boundaries: true } });
   return authorities.map((a) => ({
     id: a.id,
     name: a.name,

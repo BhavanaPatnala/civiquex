@@ -6,10 +6,15 @@ import type { RiskLevelCode } from "@/lib/types";
 export async function refreshHotspot(roadSegmentId: string, incidentType: string): Promise<{ hotspotId: string; isRecurring: boolean }> {
   const since = new Date(Date.now() - HOTSPOT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  const incidents = await prisma.incident.findMany({
-    where: { roadSegmentId, incidentType, createdAt: { gte: since } },
-    include: { resolutionChecks: { orderBy: { checkedAt: "desc" }, take: 1 } },
-  });
+  // Independent tables, no shared dependency — safe to run concurrently.
+  const [incidents, existing] = await Promise.all([
+    prisma.incident.findMany({
+      where: { roadSegmentId, incidentType, createdAt: { gte: since } },
+      relationLoadStrategy: "join",
+      include: { resolutionChecks: { orderBy: { checkedAt: "desc" }, take: 1 } },
+    }),
+    prisma.hotspot.findFirst({ where: { roadSegmentId, incidentType } }),
+  ]);
 
   const samples: HotspotIncidentSample[] = incidents.map((inc) => ({
     incidentId: inc.id,
@@ -19,8 +24,6 @@ export async function refreshHotspot(roadSegmentId: string, incidentType: string
   }));
 
   const computed = computeHotspot(samples);
-
-  const existing = await prisma.hotspot.findFirst({ where: { roadSegmentId, incidentType } });
 
   const hotspot = existing
     ? await prisma.hotspot.update({

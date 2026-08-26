@@ -5,6 +5,10 @@ import { ok, fail, withApiHandler } from "@/lib/api/respond";
 export const GET = withApiHandler(async (_req: Request, { params }: { params: { id: string } }) => {
   const incident = await prisma.incident.findFirst({
     where: { OR: [{ id: params.id }, { publicId: params.id }] },
+    // See app/api/incidents/route.ts — real SQL JOINs instead of one
+    // sequential round-trip per relation level (this shape is the deepest
+    // in the app, ~10 branches).
+    relationLoadStrategy: "join",
     include: {
       location: true,
       roadSegment: true,

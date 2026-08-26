@@ -32,29 +32,37 @@ export const GET = withApiHandler(async (req: Request, { params }: { params: { f
 
   const evidence = await prisma.evidence.findFirst({ where: { storageRef: `/api/media/${filename}` } });
 
-  let data: Buffer;
-  if (evidence?.blobUrl) {
-    // Private-access blob (see lib/api/media.ts) — requires an authenticated
-    // read via the SDK (BLOB_READ_WRITE_TOKEN), not a bare fetch(); the raw
-    // URL alone is not fetchable by design, matching the app's real access
-    // model where evidence is never a bare public link.
-    const result = await get(evidence.blobUrl, { access: "private" });
-    if (!result) return fail("Media not found", 404);
-    data = Buffer.from(await new Response(result.stream).arrayBuffer());
-  } else {
-    const filePath = path.join(UPLOAD_DIR, filename);
-    try {
-      data = await fs.readFile(filePath);
-    } catch {
-      return fail("Media not found", 404);
-    }
-  }
+  // The access-log write only depends on `evidence`, same as the media
+  // fetch below — they don't depend on each other, so running them
+  // sequentially was pure added latency (another ~500ms Neon round trip
+  // stacked on top of the blob fetch) for no reason. Concurrent instead.
+  const mediaPromise: Promise<Buffer> = evidence?.blobUrl
+    ? // Private-access blob (see lib/api/media.ts) — requires an
+      // authenticated read via the SDK (BLOB_READ_WRITE_TOKEN), not a bare
+      // fetch(); the raw URL alone is not fetchable by design, matching the
+      // app's real access model where evidence is never a bare public link.
+      get(evidence.blobUrl, { access: "private" }).then(async (result) => {
+        if (!result) throw new Error("not-found");
+        return Buffer.from(await new Response(result.stream).arrayBuffer());
+      })
+    : fs.readFile(path.join(UPLOAD_DIR, filename));
 
-  if (evidence) {
-    await prisma.evidenceAccessLog.create({
-      data: { evidenceId: evidence.id, actorId: session.id, action: "view" },
-    });
+  const logPromise = evidence
+    ? prisma.evidenceAccessLog.create({ data: { evidenceId: evidence.id, actorId: session.id, action: "view" } })
+    : Promise.resolve(null);
+
+  // Both requests are already in flight concurrently at this point. Awaited
+  // separately (not Promise.all) so a genuine access-log failure — an
+  // accountability nicety, not a precondition for serving evidence a
+  // session has already been authorized to see — can never turn into a
+  // false "media not found" for the caller.
+  let data: Buffer;
+  try {
+    data = await mediaPromise;
+  } catch {
+    return fail("Media not found", 404);
   }
+  await logPromise.catch((err) => console.error("[media] failed to record evidence access log", err));
 
   const ext = filename.split(".").pop() ?? "";
   return new NextResponse(new Uint8Array(data), {

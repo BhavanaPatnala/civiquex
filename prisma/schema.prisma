@@ -6,7 +6,8 @@
 // rather than PostGIS, to keep the schema itself engine-agnostic.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

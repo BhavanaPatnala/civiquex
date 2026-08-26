@@ -124,6 +124,7 @@ export const GET = withApiHandler(async (req: Request) => {
   const detections = await prisma.patrolDetection.findMany({
     orderBy: { createdAt: "desc" },
     take: q.limit,
+    relationLoadStrategy: "join",
     include: { contract: true, media: true },
   });
 

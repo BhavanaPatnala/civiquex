@@ -66,6 +66,11 @@ export const GET = withApiHandler(async (req: Request) => {
       orderBy: { createdAt: "desc" },
       take: q.limit,
       skip: q.offset,
+      // Prisma's default "query" strategy issues one round-trip per relation
+      // level (9 sequential round trips for this shape, measured) — against
+      // a remote Postgres like Neon that's ~500ms of pure latency each, not
+      // execution time. "join" collapses it into real SQL JOINs.
+      relationLoadStrategy: "join",
       include: {
         location: true,
         roadSegment: true,

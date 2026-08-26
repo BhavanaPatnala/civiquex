@@ -28,12 +28,14 @@ export const GET = withApiHandler(async (req: Request) => {
   const [incidents, hotspots] = await Promise.all([
     prisma.incident.findMany({
       where,
+      relationLoadStrategy: "join",
       include: { location: true },
       orderBy: { createdAt: "desc" },
       take: 1000,
     }),
     prisma.hotspot.findMany({
       where: { incidentCount: { gte: RECURRENCE_THRESHOLD } },
+      relationLoadStrategy: "join",
       include: { location: true, roadSegment: true },
     }),
   ]);

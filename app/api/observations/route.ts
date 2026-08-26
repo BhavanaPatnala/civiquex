@@ -138,6 +138,7 @@ export const GET = withApiHandler(async (req: Request) => {
     where: query.incidentType ? { incidentTypeGuess: query.incidentType } : undefined,
     orderBy: { capturedAt: "desc" },
     take: query.limit,
+    relationLoadStrategy: "join",
     include: { incidentLinks: { select: { incidentId: true } } },
   });
 

@@ -17,6 +17,8 @@ export const GET = withApiHandler(async (req: Request) => {
       incidentCount: q.recurringOnly === "true" ? { gte: RECURRENCE_THRESHOLD } : undefined,
       riskLevel: q.riskLevel ? (q.riskLevel as never) : undefined,
     },
+    // See app/api/incidents/route.ts — real SQL JOINs instead of sequential round trips.
+    relationLoadStrategy: "join",
     include: {
       roadSegment: true,
       location: true,

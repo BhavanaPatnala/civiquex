@@ -12,7 +12,11 @@ import type { Detection, VisionResult } from "@/lib/ai/vision";
 export const POST = withApiHandler(async (_req: Request, { params }: { params: { id: string } }) => {
   const session = await requireSession();
 
-  const detection = await prisma.patrolDetection.findUnique({ where: { id: params.id }, include: { media: true, contract: true } });
+  const detection = await prisma.patrolDetection.findUnique({
+    where: { id: params.id },
+    relationLoadStrategy: "join",
+    include: { media: true, contract: true },
+  });
   if (!detection) return fail("Patrol detection not found", 404);
   if (detection.status !== "candidate") return fail(`Already ${detection.status}`, 409);
 

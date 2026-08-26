@@ -10,6 +10,7 @@ export const POST = withApiHandler(async (_req: Request, { params }: { params: {
 
   const incident = await prisma.incident.findFirst({
     where: { OR: [{ id: params.id }, { publicId: params.id }] },
+    relationLoadStrategy: "join",
     include: { authority: true },
   });
   if (!incident) return fail("Incident not found", 404);

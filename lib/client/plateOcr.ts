@@ -74,6 +74,15 @@ export async function getPlateOcrWorker(): Promise<TesseractWorker> {
   return workerPromise;
 }
 
+/**
+ * Kicks off the OCR model download without waiting for it. Called at the start
+ * of recovery so the multi-megabyte language data fetches in parallel with the
+ * detection pass instead of stalling the first plate read.
+ */
+export function warmUpPlateOcr(): void {
+  void getPlateOcrWorker().catch(() => undefined);
+}
+
 export async function disposePlateOcrWorker(): Promise<void> {
   if (!workerPromise) return;
   const worker = await workerPromise.catch(() => null);

@@ -105,6 +105,8 @@ interface IncidentResult {
 
 const CHENNAI_FALLBACK = { lat: 13.045, lng: 80.24 };
 const MAX_RECORD_SECONDS = 10;
+/** Absolute ceiling on plate recovery. Past this the report proceeds without a plate. */
+const PLATE_RECOVERY_CEILING_MS = 60_000;
 
 // A resumable upload only saves the raw bytes (see lib/client/uploadStore.ts)
 // — resuming the actual submission also needs the category/location/time
@@ -361,17 +363,32 @@ function ReportPageInner() {
       // multi-frame agreement this pipeline requires before it will identify a
       // vehicle, so photos deliberately skip it rather than producing a
       // single-frame reading that could never be confirmed anyway.
+      // Plate recovery is strictly best-effort and must never be able to block
+      // or fail the actual report. It is raced against a hard ceiling so a
+      // pathological clip (or a slow OCR model download) degrades to "no plate
+      // recovered" instead of leaving the reporter stuck on a spinner.
       let plateOutcome: PlateRecoveryOutcome | null = null;
       if (isVideo) {
         setPlateProgress({ stage: "Searching the recording for the best evidence…", fraction: 0 });
-        plateOutcome = await recoverPlateFromVideo(activeBlob, {
-          detect: detector.detectInCanvas,
-          sourceMediaHash: "pending",
-          onProgress: (stage, fraction) => setPlateProgress({ stage, fraction }),
-        }).catch((err) => {
-          console.error("[plate] recovery failed", err);
-          return null;
-        });
+        const plateAbort = new AbortController();
+        const ceiling = new Promise<null>((resolve) =>
+          setTimeout(() => {
+            plateAbort.abort();
+            resolve(null);
+          }, PLATE_RECOVERY_CEILING_MS)
+        );
+        plateOutcome = await Promise.race([
+          recoverPlateFromVideo(activeBlob, {
+            detect: detector.detectInCanvas,
+            sourceMediaHash: "pending",
+            onProgress: (stage, fraction) => setPlateProgress({ stage, fraction }),
+            signal: plateAbort.signal,
+          }).catch((err) => {
+            console.error("[plate] recovery failed", err);
+            return null;
+          }),
+          ceiling,
+        ]);
         setPlateProgress(null);
         setPlateResult(plateOutcome?.result ?? null);
       }

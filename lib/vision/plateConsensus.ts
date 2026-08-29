@@ -62,8 +62,20 @@ const MIN_ABSOLUTE_CHARACTER_WEIGHT = 0.35;
 const MIN_RESOLVED_RATIO_FOR_PARTIAL = 0.5;
 /** Independent agreeing frames required for CONFIRMED — one frame is never enough (§11). */
 const MIN_FRAMES_FOR_CONFIRMED = 2;
-/** Plate crops narrower than this cannot carry legible characters; never upscale-and-guess (§19). */
-export const MIN_PLATE_PIXEL_WIDTH = 64;
+/**
+ * Resolution gate (§19, §24). A plate crop narrower than this cannot carry
+ * enough real pixels per character to be trusted, and is excluded rather than
+ * upscaled — super-resolution cannot recover detail the sensor never captured.
+ *
+ * Calibrated against measured behaviour, not guessed: a 75px-wide crop of a
+ * 10-character plate (~7px per character) was observed reading back a
+ * confidently-wrong NINE-character plate — it silently dropped a character
+ * while reporting 95% confidence. A truncated plate reported confidently is
+ * exactly the false-identification failure this system exists to prevent.
+ * 120px gives ~12px per character, which is at the low end of what OCR can
+ * resolve reliably.
+ */
+export const MIN_PLATE_PIXEL_WIDTH = 120;
 
 export interface ConsensusInput {
   observations: PlateObservation[];

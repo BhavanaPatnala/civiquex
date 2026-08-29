@@ -157,6 +157,40 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
 
   useEffect(() => () => stop(), [stop]);
 
+  /**
+   * Runs the loaded detector directly against a canvas and returns normalized
+   * detections. Used by the temporal plate-recovery pipeline, which walks
+   * many decoded video frames and must not pay a canvas→blob→bitmap round
+   * trip per frame. Waits for the model rather than silently returning empty.
+   */
+  const detectInCanvas = useCallback(
+    async (canvas: HTMLCanvasElement): Promise<DetectedObject[]> => {
+      loadModel();
+      for (let attempt = 0; attempt < 100 && !modelRef.current; attempt++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const model = modelRef.current;
+      if (!model) return [];
+      try {
+        const predictions = await model.detect(canvas);
+        return predictions.map((p) => ({
+          label: p.class,
+          confidence: p.score,
+          bbox: [p.bbox[0] / canvas.width, p.bbox[1] / canvas.height, p.bbox[2] / canvas.width, p.bbox[3] / canvas.height] as [
+            number,
+            number,
+            number,
+            number,
+          ],
+        }));
+      } catch (err) {
+        console.error("[patrol] canvas detection failed", err);
+        return [];
+      }
+    },
+    [loadModel]
+  );
+
   /** Captures the current video frame as a JPEG blob, for uploading a flagged candidate. */
   const captureFrameBlob = useCallback(async (): Promise<Blob | null> => {
     const video = videoRef.current;
@@ -223,6 +257,7 @@ export function useRoadPatrolDetector(videoRef: React.RefObject<HTMLVideoElement
     stop,
     runOnce,
     analyzeImageBlob,
+    detectInCanvas,
     lastResult,
     framesAnalyzed,
     avgInferenceMs,

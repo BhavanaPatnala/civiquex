@@ -139,18 +139,41 @@ describe("buildPlateConsensus — the no-hallucination guarantee", () => {
   });
 
   it("does not let a confident read off a terrible frame outvote agreeing good frames", () => {
+    // Adequate resolution deliberately, so this exercises the QUALITY guard
+    // rather than being filtered out earlier by the resolution gate.
     const awful: FrameQualityScores = { sharpness: 0.05, motionBlur: 0.05, exposure: 0.2, contrast: 0.1, glare: 0.2, overall: 8 };
     const out = buildPlateConsensus({
       observations: [
         obs("TN09AB1234"),
         obs("TN09AB1234"),
-        obs("TN09AB1299", { charConf: 0.99, ocrConfidence: 0.99, quality: awful, platePixelWidth: 70 }),
+        obs("TN09AB1299", { charConf: 0.99, ocrConfidence: 0.99, quality: awful, platePixelWidth: 200 }),
       ],
     });
     // The bad frame disagrees on non-confusable digits, so this must surface as
     // a conflict — it must NOT quietly win on raw OCR confidence.
     expect(out.decision).toBe("CONFLICTING");
     expect(out.characters[8].character).not.toBe("9");
+  });
+
+  it("REGRESSION: refuses a low-resolution crop that silently truncates the plate", () => {
+    // Found by running real OCR against a 75px-wide plate crop: it returned a
+    // NINE-character plate at 95% confidence, having silently dropped a
+    // character. A confidently-reported truncated plate is precisely the
+    // false-identification failure this system exists to prevent, so the
+    // resolution gate must exclude crops like this outright.
+    const truncated = "TN09AB123"; // one character short of the real plate
+    const out = buildPlateConsensus({
+      observations: [obs(truncated, { platePixelWidth: 75 }), obs(truncated, { platePixelWidth: 75 })],
+    });
+    expect(out.decision).toBe("UNREADABLE");
+    expect(out.plate).toBeNull();
+  });
+
+  it("REGRESSION: a truncated low-res read mixed with full-res reads is a conflict, not a silent pick", () => {
+    const out = buildPlateConsensus({
+      observations: [obs("TN09AB1234"), obs("TN09AB1234"), obs("TN09AB123")],
+    });
+    expect(out.decision).toBe("CONFLICTING");
   });
 
   it("degrades to UNREADABLE when too little of the plate is established", () => {

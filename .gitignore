@@ -40,3 +40,6 @@ next-env.d.ts
 # uploads (demo evidence store)
 /storage/uploads/*
 !/storage/uploads/.gitkeep
+
+# Tesseract language data, downloaded on demand at runtime (never committed)
+*.traineddata

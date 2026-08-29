@@ -30,6 +30,9 @@ import {
   type ResumableUpload,
 } from "@/lib/client/uploadMedia";
 import { getPendingBlob } from "@/lib/client/uploadStore";
+import { recoverPlateFromVideo, type PlateRecoveryOutcome } from "@/lib/client/plateRecovery";
+import type { PlateRecoveryResult } from "@/lib/vision/plateTypes";
+import { PlateEvidenceCard } from "@/components/domain/plate-evidence-card";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast-provider";
 import { INCIDENT_TYPES } from "@/lib/types";
@@ -164,6 +167,8 @@ function ReportPageInner() {
   const [submitBusy, setSubmitBusy] = useState(false);
   const [processingLabel, setProcessingLabel] = useState("Running AI detection on your evidence…");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [plateProgress, setPlateProgress] = useState<{ stage: string; fraction: number } | null>(null);
+  const [plateResult, setPlateResult] = useState<PlateRecoveryResult | null>(null);
   const [resumable, setResumable] = useState<ResumableUpload | null>(null);
   const uploadSessionRef = useRef<{ sessionId: string; contentHash: string } | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
@@ -350,6 +355,25 @@ function ReportPageInner() {
           description: "Continuing with a lower-confidence fallback — try again once the detector finishes loading for a more accurate result.",
           variant: "destructive",
         });
+      }
+
+      // Temporal plate recovery — video only. A still frame cannot support the
+      // multi-frame agreement this pipeline requires before it will identify a
+      // vehicle, so photos deliberately skip it rather than producing a
+      // single-frame reading that could never be confirmed anyway.
+      let plateOutcome: PlateRecoveryOutcome | null = null;
+      if (isVideo) {
+        setPlateProgress({ stage: "Searching the recording for the best evidence…", fraction: 0 });
+        plateOutcome = await recoverPlateFromVideo(activeBlob, {
+          detect: detector.detectInCanvas,
+          sourceMediaHash: "pending",
+          onProgress: (stage, fraction) => setPlateProgress({ stage, fraction }),
+        }).catch((err) => {
+          console.error("[plate] recovery failed", err);
+          return null;
+        });
+        setPlateProgress(null);
+        setPlateResult(plateOutcome?.result ?? null);
       }
 
       setProcessingLabel(isVideo ? "Uploading video evidence…" : "Correlating, checking applicable rules, and computing evidence…");
@@ -668,8 +692,15 @@ function ReportPageInner() {
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-16">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              <p className="text-sm font-medium">{processingLabel}</p>
-              {uploadProgress !== null ? (
+              <p className="text-sm font-medium">{plateProgress ? plateProgress.stage : processingLabel}</p>
+              {plateProgress ? (
+                <div className="w-full max-w-xs">
+                  <Progress value={Math.round(plateProgress.fraction * 100)} />
+                  <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+                    Searching every frame for the clearest view of the vehicle — the best evidence is often not the moment of the violation.
+                  </p>
+                </div>
+              ) : uploadProgress !== null ? (
                 <div className="w-full max-w-xs">
                   <Progress value={Math.round(uploadProgress * 100)} />
                   <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
@@ -707,6 +738,8 @@ function ReportPageInner() {
                 <ReviewRow label="Time" value={incident.observations[0] ? formatDateTime(incident.observations[0].observation.capturedAt) : "—"} />
                 <ReviewRow label="Vehicle" value={vehicleLine(incident.observations[0]?.observation.vehicle ?? null)} full />
               </div>
+
+              {plateResult && <PlateEvidenceCard result={plateResult} />}
 
               {(() => {
                 const triage: Triage = deriveTriage(incident.ruleVerdict, incident.evidenceConfidenceOverall);
